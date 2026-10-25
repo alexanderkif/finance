@@ -1,0 +1,477 @@
+<div class="dashboard-shell">
+  <aside class="sidebar" aria-label="Main navigation">
+    <a class="brand" href="/" aria-label="Northstar Finance home">
+      <span class="brand-mark" aria-hidden="true">n</span>
+      <span>northstar<span class="brand-light">.finance</span></span>
+    </a>
+
+    <div class="sidebar-label">WORKSPACE</div>
+    <nav class="primary-nav" aria-label="Dashboard">
+      <a class="nav-item nav-item-active" href="#overview" aria-current="page">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <rect x="3" y="3" width="5" height="6" rx="1" />
+          <rect x="12" y="3" width="5" height="4" rx="1" />
+          <rect x="12" y="10" width="5" height="7" rx="1" />
+          <rect x="3" y="12" width="5" height="5" rx="1" />
+        </svg>
+        Overview
+      </a>
+      <a class="nav-item" href="#markets">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M3 15.5 7.2 10l3.2 2.9L16.8 5M12.5 5h4.3v4.3" />
+        </svg>
+        Markets
+      </a>
+      <a class="nav-item" href="#news">
+        <svg viewBox="0 0 20 20" aria-hidden="true">
+          <path d="M4 4.5h12v11H4zM7 8h6M7 11h6M7 14h3" />
+        </svg>
+        News & research
+      </a>
+    </nav>
+
+    <div class="watchlist-heading">
+      <span class="sidebar-label">WATCHLIST</span>
+      <span class="watchlist-count">04</span>
+    </div>
+    <div class="watchlist" aria-label="Popular tickers">
+      <button class="watch-item" type="button" (click)="selectTicker('AAPL')">
+        <span class="ticker-avatar avatar-apple">A</span>
+        <span class="watch-copy"><strong>Apple Inc.</strong><small>AAPL · NASDAQ</small></span>
+        <span class="watch-arrow" aria-hidden="true">↗</span>
+      </button>
+      <button class="watch-item" type="button" (click)="selectTicker('NVDA')">
+        <span class="ticker-avatar avatar-nvidia">N</span>
+        <span class="watch-copy"><strong>NVIDIA Corp.</strong><small>NVDA · NASDAQ</small></span>
+        <span class="watch-arrow" aria-hidden="true">↗</span>
+      </button>
+      <button class="watch-item" type="button" (click)="selectTicker('MSFT')">
+        <span class="ticker-avatar avatar-microsoft">M</span>
+        <span class="watch-copy"><strong>Microsoft</strong><small>MSFT · NASDAQ</small></span>
+        <span class="watch-arrow" aria-hidden="true">↗</span>
+      </button>
+      <button class="watch-item" type="button" (click)="selectTicker('TSLA')">
+        <span class="ticker-avatar avatar-tesla">T</span>
+        <span class="watch-copy"><strong>Tesla, Inc.</strong><small>TSLA · NASDAQ</small></span>
+        <span class="watch-arrow" aria-hidden="true">↗</span>
+      </button>
+    </div>
+
+    <div class="sidebar-bottom">
+      <div class="market-status">
+        <span class="status-dot"></span><span>Market data connected</span>
+      </div>
+      <div class="sidebar-footer">
+        <span class="user-avatar" aria-hidden="true">A</span>
+        <span class="watch-copy"><strong>Personal workspace</strong><small>Free plan</small></span>
+        <button class="more-button" type="button" aria-label="Workspace options">···</button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main-content" id="overview">
+    <header class="topbar">
+      <div class="breadcrumb">
+        <span>Workspace</span><span class="breadcrumb-divider">/</span><strong>Overview</strong>
+      </div>
+      <div class="topbar-actions">
+        <span class="market-open"><span class="status-dot"></span>Market data feed</span>
+        <button
+          class="icon-button"
+          type="button"
+          (click)="onRefresh()"
+          aria-label="Refresh dashboard"
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path
+              d="M16.2 8A6.4 6.4 0 0 0 5.1 5.7L3.5 7.3M3.8 4.5v2.8h2.8M3.8 12a6.4 6.4 0 0 0 11.1 2.3l1.6-1.6m-.3 2.8v-2.8h-2.8"
+            />
+          </svg>
+        </button>
+        <button class="icon-button notification-button" type="button" aria-label="Notifications">
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M15 7.7a5 5 0 0 0-10 0c0 5.8-2 5.8-2 7.3h14c0-1.5-2-1.5-2-7.3ZM8 17h4" />
+          </svg>
+          <span class="notification-dot"></span>
+        </button>
+        <span class="topbar-avatar" aria-label="Alex Morgan">AM</span>
+      </div>
+    </header>
+
+    <div class="page-content">
+      <section class="page-heading">
+        <div>
+          <div class="eyebrow"><span class="eyebrow-line"></span>LIVE MARKET DASHBOARD</div>
+          <h1>Your market, <span>in focus.</span></h1>
+          <p class="page-subtitle">A clearer view of what’s moving today.</p>
+        </div>
+        <form class="search-form" (submit)="submitSearch($event)" role="search">
+          <label class="visually-hidden" for="ticker-search">Search ticker or company</label>
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <circle cx="8.8" cy="8.8" r="5.8" />
+            <path d="m13.2 13.2 4 4" />
+          </svg>
+          <input
+            id="ticker-search"
+            name="ticker"
+            type="search"
+            placeholder="Search ticker or company"
+            [value]="searchInput()"
+            (input)="updateSearchInput($event)"
+            autocomplete="off"
+          />
+          <kbd>↵</kbd>
+          <button class="visually-hidden" type="submit">Search</button>
+          @if (showSearchResults()) {
+            <div class="search-popover">
+              <div class="popover-label">MATCHING SYMBOLS</div>
+              @if (searchResults.isLoading()) {
+                <div class="popover-message">Searching markets…</div>
+              } @else if (searchQuotes().length) {
+                @for (quote of searchQuotes(); track trackQuote($index, quote)) {
+                  <button class="search-result" type="button" (click)="selectQuote(quote)">
+                    <span class="result-symbol">{{ quote.symbol }}</span>
+                    <span class="result-company">{{
+                      quote.shortname || quote.longname || 'Company'
+                    }}</span>
+                    <span class="result-exchange">{{ quote.exchange || quote.type }}</span>
+                  </button>
+                }
+              } @else {
+                <div class="popover-message">No matching symbols. Showing {{ ticker() }}.</div>
+              }
+            </div>
+          }
+        </form>
+      </section>
+
+      <section class="summary-grid" aria-label="Market summary">
+        <article class="summary-card featured-summary">
+          <div class="summary-topline">
+            <span class="card-label">TRACKING NOW</span>
+            <span class="market-pulse"><span class="status-dot"></span>DAILY DATA</span>
+          </div>
+          <div class="asset-row">
+            <span class="ticker-avatar avatar-apple large-avatar">{{ ticker().slice(0, 1) }}</span>
+            <div>
+              <h2>{{ ticker() }}</h2>
+              <p>{{ latestCandle()?.date | date: 'MMMM d, y' }} · USD</p>
+            </div>
+          </div>
+          <div class="summary-price-row">
+            @if (latestCandle(); as latest) {
+              <strong class="summary-price">{{
+                latest.close | currency: 'USD' : 'symbol' : '1.2-2'
+              }}</strong>
+              @if (priceChange(); as change) {
+                <span class="change-pill" [class.change-negative]="change < 0">
+                  {{ change >= 0 ? '+' : ''
+                  }}{{ change | currency: 'USD' : 'symbol' : '1.2-2' }} ({{
+                    priceChangePercent()! >= 0 ? '+' : ''
+                  }}{{ priceChangePercent()! | number: '1.2-2' }}%)
+                </span>
+              }
+            } @else if (candles.isLoading()) {
+              <span class="skeleton skeleton-price" aria-label="Loading current price"></span>
+            } @else {
+              <strong class="summary-price">—</strong>
+            }
+          </div>
+          <div class="summary-footnote">
+            <span class="footnote-sparkle">✳</span> Powered by Yahoo Finance
+          </div>
+        </article>
+
+        <article class="summary-card metric-card">
+          <div class="metric-heading">
+            <span class="card-label">OPEN</span><span class="metric-icon">↗</span>
+          </div>
+          @if (latestCandle(); as latest) {
+            <strong>{{ latest.open | currency: 'USD' : 'symbol' : '1.2-2' }}</strong>
+            <span class="metric-note">Session opening price</span>
+          } @else {
+            <strong>—</strong><span class="metric-note">Waiting for market data</span>
+          }
+          <div class="metric-bar"><span class="metric-bar-open"></span></div>
+        </article>
+
+        <article class="summary-card metric-card">
+          <div class="metric-heading">
+            <span class="card-label">DAY RANGE</span><span class="metric-icon">↕</span>
+          </div>
+          @if (latestCandle(); as latest) {
+            <strong
+              >{{ latest.low | currency: 'USD' : 'symbol' : '1.2-2' }}
+              <span class="range-divider">—</span>
+              {{ latest.high | currency: 'USD' : 'symbol' : '1.2-2' }}</strong
+            >
+            <span class="metric-note">Low to high</span>
+          } @else {
+            <strong>—</strong><span class="metric-note">Waiting for market data</span>
+          }
+          <div class="range-track"><span></span></div>
+        </article>
+
+        <article class="summary-card metric-card">
+          <div class="metric-heading">
+            <span class="card-label">VOLUME</span><span class="metric-icon">▥</span>
+          </div>
+          @if (latestCandle(); as latest) {
+            <strong>{{ latest.volume | number: '1.0-0' }}</strong>
+            <span class="metric-note">Shares traded</span>
+          } @else {
+            <strong>—</strong><span class="metric-note">Waiting for market data</span>
+          }
+          <div class="volume-bars" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </div>
+        </article>
+      </section>
+
+      <section class="content-grid" aria-label="Market dashboard">
+        <article class="panel chart-panel" id="markets">
+          <header class="panel-header chart-header">
+            <div>
+              <div class="panel-title-row">
+                <h2>Price action</h2>
+                <span class="live-tag"><span class="status-dot"></span>DAILY</span>
+              </div>
+              <p class="panel-subtitle">Candlestick performance · Volume</p>
+            </div>
+            <div class="chart-controls" aria-label="Chart range">
+              @for (period of ranges; track period) {
+                <button
+                  type="button"
+                  class="range-button"
+                  [class.range-selected]="range() === period"
+                  [attr.aria-pressed]="range() === period"
+                  (click)="selectRange(period)"
+                >
+                  {{ period }}
+                </button>
+              }
+            </div>
+          </header>
+          @if (candles.error(); as error) {
+            <div class="chart-error" role="alert">
+              <span class="error-symbol">!</span>
+              <div>
+                <strong>Chart unavailable</strong>
+                <p>{{ errorMessage(error) }}</p>
+              </div>
+              <button type="button" class="retry-button" (click)="candles.reload()">
+                Try again
+              </button>
+            </div>
+          }
+          @if (chartError(); as message) {
+            <div class="chart-error" role="alert">
+              <span class="error-symbol">!</span>
+              <div>
+                <strong>Chart renderer unavailable</strong>
+                <p>{{ message }}</p>
+              </div>
+            </div>
+          }
+          <div class="chart-wrap" [class.chart-loading]="candles.isLoading()">
+            <div
+              #chart
+              class="price-chart"
+              role="img"
+              [attr.aria-label]="ticker() + ' daily candlestick price and volume chart'"
+            ></div>
+            @if (candles.isLoading()) {
+              <div class="chart-loading-label">
+                <span class="loader-dot"></span>Loading market data
+              </div>
+            }
+          </div>
+          <footer class="chart-footer">
+            <span><i class="legend-candle"></i>Price</span>
+            <span><i class="legend-volume"></i>Volume</span>
+            <span class="chart-timezone">All times shown in UTC</span>
+            <a
+              class="chart-attribution"
+              href="https://www.tradingview.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              >TradingView Lightweight Charts™</a
+            >
+          </footer>
+        </article>
+
+        <article class="panel insights-panel">
+          <header class="panel-header">
+            <div>
+              <div class="panel-title-row">
+                <h2>Technical outlook</h2>
+                <span class="insight-spark">✳</span>
+              </div>
+              <p class="panel-subtitle">Signals for {{ ticker() }}</p>
+            </div>
+            <button class="panel-more" type="button" aria-label="Technical outlook options">
+              ···
+            </button>
+          </header>
+          @if (insights.isLoading()) {
+            <div class="insight-loading">
+              <span class="loader-dot"></span>Reading technical signals…
+            </div>
+          } @else if (insights.value(); as outlook) {
+            <div class="trend-list">
+              <div class="trend-item">
+                <span class="trend-label">Short term</span
+                ><span class="trend-value">{{ formatInsight(outlook.trends.short_term) }}</span
+                ><span class="trend-chevron">↗</span>
+              </div>
+              <div class="trend-item">
+                <span class="trend-label">Mid term</span
+                ><span class="trend-value">{{ formatInsight(outlook.trends.mid_term) }}</span
+                ><span class="trend-chevron">↗</span>
+              </div>
+              <div class="trend-item">
+                <span class="trend-label">Long term</span
+                ><span class="trend-value">{{ formatInsight(outlook.trends.long_term) }}</span
+                ><span class="trend-chevron">↗</span>
+              </div>
+            </div>
+            <div class="levels-heading">
+              <span class="card-label">KEY LEVELS</span
+              ><span class="levels-ticker">{{ ticker() }}</span>
+            </div>
+            <div class="levels-grid">
+              <div>
+                <span>Support</span><strong>{{ formatInsight(outlook.key_levels.support) }}</strong>
+              </div>
+              <div>
+                <span>Resistance</span
+                ><strong>{{ formatInsight(outlook.key_levels.resistance) }}</strong>
+              </div>
+              <div>
+                <span>Stop loss</span
+                ><strong>{{ formatInsight(outlook.key_levels.stop_loss) }}</strong>
+              </div>
+            </div>
+            @if (outlook.provider) {
+              <p class="insight-source">Source: {{ outlook.provider }}</p>
+            }
+          } @else if (insights.error(); as error) {
+            <div class="empty-state">
+              <span class="empty-icon">⌁</span><strong>Signals taking a pause</strong>
+              <p>{{ errorMessage(error) }}</p>
+            </div>
+          } @else {
+            <div class="empty-state">
+              <span class="empty-icon">⌁</span><strong>No technical signals yet</strong>
+              <p>Signals will appear when data is available.</p>
+            </div>
+          }
+          <footer class="panel-footer">
+            <span class="footer-indicator"></span>Analysis updates with your selected ticker
+          </footer>
+        </article>
+
+        <article class="panel news-panel" id="news">
+          <header class="panel-header">
+            <div>
+              <div class="panel-title-row">
+                <h2>In the headlines</h2>
+                <span class="news-count">{{ news().length | number: '2.0-0' }}</span>
+              </div>
+              <p class="panel-subtitle">Latest stories related to {{ ticker() }}</p>
+            </div>
+            <span class="news-live"><span class="status-dot"></span>NEWS FEED</span>
+          </header>
+          @if (searchResults.isLoading()) {
+            <div class="news-loading">
+              <span class="loader-dot"></span>Finding the latest stories…
+            </div>
+          } @else if (news().length) {
+            <div class="news-list">
+              @for (item of news(); track trackNews($index, item)) {
+                <article class="news-item">
+                  <span class="news-marker" aria-hidden="true"></span>
+                  <div class="news-copy">
+                    @if (item.link) {
+                      <a
+                        class="news-title"
+                        [href]="item.link"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        >{{ item.title || 'Read this story' }}</a
+                      >
+                    } @else {
+                      <h3 class="news-title">{{ item.title || 'Untitled story' }}</h3>
+                    }
+                    <div class="news-meta">
+                      <span>{{ item.publisher || 'Market news' }}</span>
+                      @if (item.pubtime) {
+                        <span class="news-separator">·</span
+                        ><time [dateTime]="item.pubtime * 1000 | date: 'yyyy-MM-ddTHH:mm:ss'">{{
+                          item.pubtime * 1000 | date: 'MMM d, HH:mm'
+                        }}</time>
+                      }
+                    </div>
+                  </div>
+                  <span class="news-link-icon" aria-hidden="true">↗</span>
+                </article>
+              }
+            </div>
+          } @else if (searchResults.error(); as error) {
+            <div class="empty-state news-empty">
+              <span class="empty-icon">⌁</span><strong>News feed unavailable</strong>
+              <p>{{ errorMessage(error) }}</p>
+            </div>
+          } @else {
+            <div class="empty-state news-empty">
+              <span class="empty-icon">⌁</span><strong>No headlines just yet</strong>
+              <p>Check back when new stories are published.</p>
+            </div>
+          }
+          <footer class="panel-footer news-panel-footer">
+            <span>News provided by Yahoo Finance</span><span class="footer-indicator"></span>
+          </footer>
+        </article>
+
+        <article class="panel movers-panel">
+          <header class="panel-header">
+            <div>
+              <div class="panel-title-row"><h2>Explore markets</h2></div>
+              <p class="panel-subtitle">Quickly switch to a popular ticker</p>
+            </div>
+            <span class="explore-icon" aria-hidden="true">✳</span>
+          </header>
+          @if (searchQuotes().length) {
+            <div class="explore-list">
+              @for (quote of searchQuotes().slice(0, 4); track trackQuote($index, quote)) {
+                <button class="explore-item" type="button" (click)="selectQuote(quote)">
+                  <span class="explore-symbol">{{ quote.symbol }}</span>
+                  <span class="explore-name">{{
+                    quote.shortname || quote.longname || quote.exchange || 'Market listing'
+                  }}</span>
+                  <span class="explore-arrow">↗</span>
+                </button>
+              }
+            </div>
+          } @else {
+            <div class="explore-list">
+              @for (symbol of popularTickers; track symbol) {
+                <button class="explore-item" type="button" (click)="selectTicker(symbol)">
+                  <span class="explore-symbol">{{ symbol }}</span>
+                  <span class="explore-name">Explore {{ symbol }} market data</span>
+                  <span class="explore-arrow">↗</span>
+                </button>
+              }
+            </div>
+          }
+          <footer class="panel-footer"><span>Search covers stocks, ETFs &amp; more</span></footer>
+        </article>
+      </section>
+
+      <footer class="page-footer">
+        <span>Market data is provided for informational purposes only.</span
+        ><span>Built for a clearer view of the market <span class="footer-sparkle">✳</span></span>
+      </footer>
+    </div>
+  </main>
+</div>
