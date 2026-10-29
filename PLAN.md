@@ -37,14 +37,20 @@ the product contract and verify the resulting deployment configuration.
   from both `XSP 2026-11-20` and `XSP 20.11.2026` date formats, and return
   exactly `missing_fields: ["expiration"]` for `buy call SPY 600`.
 
-## Phase 3 — Analysis graph and metrics (GATE 3)
+## Phase 3 — Analysis pipeline and metrics (GATE 3)
 
-- Implement the LangGraph flow and deterministic calculations in
-  `api/core/metrics.py`.
-- Limit the analysis to two LLM calls: classification and synthesis. Use
-  `gemini-3.1-flash-lite` for both.
-- **GATE 3:** a valid `POST /api/analysis/run` returns an `AnalysisResult`
-  with the required header, metrics, event flags, and answer language.
+- Implement the deterministic pipeline in `api/agent/graph.py` and the
+  calculations in `api/core/metrics.py`.
+- Classify the playbook deterministically. Make no more than two Gemini calls
+  across the flow: extraction in `parse` and synthesis in `run`.
+- Implement `POST /api/analysis/run` with the deterministic header, per-contract
+  dollar metrics, delta-implied probability, liquidity, 1-sigma scenario,
+  event flags, disclaimer, and answer language.
+- Report unavailable metrics explicitly: `iv_rank` stays `null` with a warning
+  until a historical IV source exists.
+- **GATE 3:** a valid `POST /api/analysis/run` returns an `AnalysisResult` with
+  the required header, metrics, event flags, and answer language; contract
+  tests cover the 422, 429, and 502 paths.
 
 ## Phase 4 — Angular dashboard and analysis UI (GATE 4)
 

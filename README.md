@@ -23,6 +23,8 @@ vercel dev
 ```text
 http://localhost:3000/api/market/SPY
 http://localhost:3000/api/options/chain/SPY
+POST /api/analysis/parse
+POST /api/analysis/run
 http://localhost:3000/api/docs
 ```
 

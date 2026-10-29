@@ -35,10 +35,10 @@ api/
 
 Keep HTTP routing, provider access, deterministic metrics, and LLM orchestration
 in their respective modules. Use `gemini-3.1-flash-lite` for both model calls
-per analysis (classification and synthesis). Prefer a direct Gemini
-structured-output call; adopt LangChain/LangGraph only if the analysis flow
-grows beyond one deterministic pipeline, and record that decision. The current
-implementation calls Gemini directly over HTTP.
+per analysis: extraction and synthesis. Prefer a direct Gemini structured-output
+call; adopt LangChain/LangGraph only if the analysis flow grows beyond one
+deterministic pipeline, and record that decision. The current implementation
+calls Gemini directly over HTTP and runs the pipeline in `api/agent/graph.py`.
 
 Read `GEMINI_API_KEY` only in the server process. Load it from the
 repository-root `.env.local` for local development and from deployment
@@ -72,8 +72,11 @@ components, or data services. Follow [src/AGENTS.md](src/AGENTS.md).
 Analysis state contains intent, position, missing fields, playbook, market
 data, metrics, result, and detected language. Natural-language extraction uses
 Gemini structured output; schema validation, strategy classification, and all
-financial arithmetic remain deterministic. LLM calls are limited to
-classification and synthesis.
+financial arithmetic remain deterministic in `api/core/metrics.py`. LLM calls
+are limited to extraction and synthesis: one extraction call in
+`POST /api/analysis/parse` and at most one synthesis call in
+`POST /api/analysis/run`. The synthesis prompt receives computed facts and must
+not perform arithmetic.
 
 ## Rewrite freedom and current implementation
 

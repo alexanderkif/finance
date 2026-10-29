@@ -88,27 +88,96 @@ not start analysis.
 
 ## `POST /api/analysis/run`
 
+Runs a deterministic analysis for a complete position. Call `parse` first and do
+not call this endpoint while `missing_fields` is non-empty.
+
 Request:
 
-```text
-position: SingleLeg | Strategy
-intent: "open" | "close" | "roll"
-detected_language: string
+```json
+{
+  "position": {
+    "position_type": "strategy",
+    "legs": [
+      {
+        "symbol": "XSP",
+        "side": "sell",
+        "option_type": "put",
+        "strike": 732,
+        "expiration": "2026-11-20"
+      },
+      {
+        "symbol": "XSP",
+        "side": "buy",
+        "option_type": "put",
+        "strike": 729,
+        "expiration": "2026-11-20"
+      }
+    ]
+  },
+  "intent": "open",
+  "detected_language": "English"
+}
 ```
 
-Response `AnalysisResult` includes:
+- `position_type` must match the leg count: one leg for `single`, two for
+  `strategy`.
+- The legs must satisfy the vertical-spread truth table; otherwise the endpoint
+  returns `422`.
+- Every leg field is required. Incomplete input is rejected with `422` instead
+  of being guessed.
+- Return `422` when the chain has no matching contract or no executable bid/ask
+  for a leg.
+
+Response `AnalysisResult`:
 
 ```text
-header, recommendation, probability_positive, max_profit, max_loss,
-net_credit_debit, theta_daily, iv_rank, event_flags, liquidity,
-scenario_1sigma, warnings[]
+strategy_key, header, recommendation, probability_positive, max_profit,
+max_loss, net_credit_debit, breakeven, theta_daily, iv_rank, event_flags,
+liquidity, scenario_1sigma, detected_language, disclaimer, source, as_of,
+degraded, warnings[]
 ```
 
-The header is deterministic. Example:
-`Bull Put Spread XSP 732/729 2026-11-20`.
-Every analysis includes `Educational analysis, not investment advice.` and
-answers in the detected language. Calculated values come from deterministic
-backend code, not the LLM.
+Conventions:
+
+- Dollar values are per one contract per leg. `net_credit_debit` is signed:
+  positive is a credit, negative is a debit.
+- `max_profit` and `max_loss` are `null` only when theoretically unbounded: a
+  long call's profit and a short call's loss.
+- `probability_positive` is a delta-implied approximation, not a forecast: the
+  absolute delta of the deciding long leg for debit structures, and one minus
+  the absolute delta of the deciding short leg for credit structures.
+- `theta_daily` is the position theta for one contract per leg, built from
+  CBOE's per-share theta.
+- `iv_rank` is `null` with an `iv_rank_unavailable` warning until a historical
+  IV source exists.
+- `event_flags` lists the playbook's sensitive events (`earnings`, `dividends`,
+  `macro`). It is not an event calendar.
+- `liquidity` reports the worst-leg bid/ask spread percent, the minimum open
+  interest and volume across legs, and a `good`/`fair`/`poor`/`unknown` rating.
+- `scenario_1sigma` is the expected move over the option's days to expiration:
+  `underlying_price * atm_iv * sqrt(days_to_expiration / 365)`, where `atm_iv`
+  is selected from the chain at the strike closest to the underlying price.
+- `header` is deterministic and ordered short leg / long leg:
+  `Bull Put Spread XSP 732/729 2026-11-20`. A single-leg header is
+  `Long Call SPY 600 2026-11-20`.
+- `degraded` is true when any warning is present.
+- `recommendation` comes from one Gemini synthesis call and must use only the
+  supplied facts. It must not define the strategy or give trade instructions.
+  The disclaimer is added deterministically, not by the model.
+- The whole flow makes at most two Gemini calls: one extraction call in `parse`
+  and one synthesis call in `run`.
+
+Example response values for the request above, given executable quotes and a
+chain with a matching contract:
+
+```text
+header: "Bull Put Spread XSP 732/729 2026-11-20"
+net_credit_debit: 150.0
+max_profit: 150.0
+max_loss: 150.0
+breakeven: 730.5
+disclaimer: "Educational analysis, not investment advice."
+```
 
 ## Contract and integration tests
 
@@ -117,6 +186,14 @@ backend code, not the LLM.
 - Parse bull put and bear call spreads from natural language.
 - Test maximum loss for a credit spread and probability calculation from
   delta.
+- Run analysis against a mocked chain and mocked Gemini, and assert the header,
+  credit/debit metrics, breakeven, probability, theta, liquidity, 1-sigma
+  scenario, event flags, disclaimer, and answer language.
+- Assert that `run` makes exactly one Gemini synthesis call and passes the
+  computed metrics as facts.
+- Assert `422` for a missing contract and for legs that do not form a supported
+  spread, `429` for Gemini quota exhaustion, and `502` for a CBOE outage.
+- Assert `iv_rank` is `null` with an `iv_rank_unavailable` warning.
 - Mock CBOE 200 and verify normalized chain, `source`, and `as_of`.
 - Mock CBOE 503 and verify degraded output without fabricated values.
 - Mock CBOE 429 with a fresh cache and verify the cached chain is served.

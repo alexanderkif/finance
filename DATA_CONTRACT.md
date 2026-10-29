@@ -5,7 +5,10 @@
 - Options URL:
   `https://cdn.cboe.com/api/global/delayed_quotes/options/{SYMBOL}.json`
 - Index symbols require a leading underscore (for example, `_SPX`, `_VIX`,
-  `_NDX`); equity symbols do not (for example, `TSLA`, `SPY`).
+  `_NDX`, `_XSP`); equity symbols do not (for example, `TSLA`, `SPY`). XSP is
+  an index for CBOE and must be requested as `_XSP`.
+- Index payloads echo `data.symbol` with a leading `^` (for example `^XSP`).
+  Normalize `_` and `^` before comparing symbols.
 - Read options from `data.options[]`. The fields used by the application are
   `option`, `bid`, `ask`, `iv`, `delta`, `gamma`, `theta`, `vega`,
   `open_interest`, and `volume`.

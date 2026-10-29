@@ -12,6 +12,7 @@ from core.cboe_provider import (
 
 def cboe_payload(
     symbol: str = "SPY",
+    data_symbol: str | None = None,
     options: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     if options is None:
@@ -34,7 +35,7 @@ def cboe_payload(
         "timestamp": "2026-10-28T15:48:15Z",
         "symbol": symbol,
         "data": {
-            "symbol": symbol,
+            "symbol": data_symbol if data_symbol is not None else symbol,
             "current_price": 772.31,
             "price_change_percent": 0.3431,
             "options": options,
@@ -65,6 +66,38 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(chain.contracts), 1)
         self.assertEqual(chain.contracts[0].option, "SPY261120P00732000")
         self.assertEqual(chain.contracts[0].open_interest, 240)
+
+    async def test_accepts_an_index_payload_with_a_caret_data_symbol(self) -> None:
+        async def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(
+                request.url.path,
+                "/api/global/delayed_quotes/options/_XSP.json",
+            )
+            return httpx.Response(
+                200,
+                json=cboe_payload(
+                    symbol="_XSP",
+                    data_symbol="^XSP",
+                    options=[
+                        {
+                            "option": "XSP261120P00732000",
+                            "bid": 2.45,
+                            "ask": 2.5,
+                            "delta": -0.31,
+                            "theta": -0.04,
+                            "open_interest": 240,
+                        }
+                    ],
+                ),
+            )
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        ) as client:
+            chain = await CboeOptionsProvider(client).get_chain("XSP")
+
+        self.assertEqual(chain.symbol, "XSP")
+        self.assertEqual(chain.contracts[0].option, "XSP261120P00732000")
 
     async def test_reads_market_values_from_verified_payload_fields(self) -> None:
         async def handler(request: httpx.Request) -> httpx.Response:
@@ -222,11 +255,12 @@ class CboeSymbolTests(unittest.TestCase):
         self.assertEqual(normalize_cboe_symbol("SPX"), "_SPX")
         self.assertEqual(normalize_cboe_symbol("_VIX"), "_VIX")
         self.assertEqual(normalize_cboe_symbol("NDX"), "_NDX")
+        self.assertEqual(normalize_cboe_symbol("XSP"), "_XSP")
         self.assertEqual(normalize_cboe_symbol("_RUT"), "_RUT")
 
-    def test_keeps_equity_and_xsp_symbols_unprefixed(self) -> None:
+    def test_keeps_equity_symbols_unprefixed(self) -> None:
         self.assertEqual(normalize_cboe_symbol(" spy "), "SPY")
-        self.assertEqual(normalize_cboe_symbol("XSP"), "XSP")
+        self.assertEqual(normalize_cboe_symbol("TSLA"), "TSLA")
 
     def test_rejects_an_empty_symbol(self) -> None:
         with self.assertRaisesRegex(ValueError, "must not be empty"):

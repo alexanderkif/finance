@@ -87,5 +87,7 @@ files.
 - Every analysis includes the disclaimer:
   **Educational analysis, not investment advice.**
 - Every market-data response includes its source and `as_of` timestamp.
-- The strategy header format is
-  `{display_name} {underlying} {leg1_strike}/{leg2_strike} {expiration}`.
+- The strategy header is
+  `{display_name} {underlying} {short_strike}/{long_strike} {expiration}` for a
+  vertical spread and `{display_name} {underlying} {strike} {expiration}` for a
+  single option. Example: `Bull Put Spread XSP 732/729 2026-11-20`.

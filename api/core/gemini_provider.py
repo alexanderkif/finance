@@ -1,5 +1,5 @@
 import json
-from typing import Final, Literal
+from typing import Final, Literal, cast
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -111,22 +111,26 @@ def _read_model_text(response_data: object) -> str:
     raise GeminiResponseError("Gemini returned no structured text.")
 
 
-async def extract_position(
+async def generate_structured(
     client: httpx.AsyncClient,
+    *,
+    system_instruction: str,
+    response_schema: dict[str, object],
     message: str,
-) -> ExtractedPosition:
+    temperature: float = 0.0,
+) -> dict[str, object]:
     try:
         api_key = require_gemini_api_key()
     except RuntimeError as error:
         raise GeminiConfigurationError(str(error)) from error
 
     request_body: dict[str, object] = {
-        "systemInstruction": {"parts": [{"text": _SYSTEM_INSTRUCTION}]},
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
         "contents": [{"parts": [{"text": message}]}],
         "generationConfig": {
-            "temperature": 0,
+            "temperature": temperature,
             "responseMimeType": "application/json",
-            "responseSchema": _RESPONSE_SCHEMA,
+            "responseSchema": response_schema,
         },
     }
     try:
@@ -143,14 +147,34 @@ async def extract_position(
         raise GeminiRateLimitError("Gemini quota is exhausted or rate limited.")
     if response.is_error:
         raise GeminiRequestError(
-            f"Gemini rejected the parsing request (HTTP {response.status_code})."
+            f"Gemini rejected the request (HTTP {response.status_code})."
         )
 
     try:
         response_text = _read_model_text(response.json())
         decoded = json.loads(response_text)
+    except (ValueError, TypeError) as error:
+        raise GeminiResponseError(
+            "Gemini returned an invalid structured result."
+        ) from error
+    if not isinstance(decoded, dict):
+        raise GeminiResponseError("Gemini returned an invalid structured result.")
+    return cast(dict[str, object], decoded)
+
+
+async def extract_position(
+    client: httpx.AsyncClient,
+    message: str,
+) -> ExtractedPosition:
+    decoded = await generate_structured(
+        client,
+        system_instruction=_SYSTEM_INSTRUCTION,
+        response_schema=_RESPONSE_SCHEMA,
+        message=message,
+    )
+    try:
         return ExtractedPosition.model_validate(decoded)
-    except (ValueError, TypeError, ValidationError) as error:
+    except ValidationError as error:
         raise GeminiResponseError(
             "Gemini returned an invalid structured parsing result."
         ) from error

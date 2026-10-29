@@ -52,14 +52,28 @@ Update `CHANGELOG_LATEST.md` with each completed phase.
   (`python -m unittest discover -s api -p "test_*.py"`). Gemini calls are
   covered by mocked contract tests; no live model call was recorded.
 
-## Phase 3 — Analysis graph and metrics [ ]
+## Phase 3 — Analysis graph and metrics [x]
 
-- [ ] Implement classify, completeness, playbook, fetch, metrics, synthesize,
-      and format nodes.
-- [ ] Implement deterministic calculations in `api/core/metrics.py`.
-- [ ] Verify no more than two LLM calls per analysis.
-- [ ] Test `POST /api/analysis/run`, output header, disclaimer, and language.
-- **GATE 3:** end-to-end analysis acceptance criteria pass.
+- [x] Implement the deterministic pipeline in `api/agent/graph.py`.
+- [x] Implement deterministic calculations in `api/core/metrics.py`.
+- [x] Verify no more than two LLM calls per analysis: one extraction call in
+      `parse` and one synthesis call in `run`.
+- [x] Test `POST /api/analysis/run`, output header, disclaimer, and language.
+- **GATE 3:** passed on 2026-10-29. A mocked chain with a bull put spread
+  returns `header: "Bull Put Spread SPY 732/729 2026-11-20"`,
+  `net_credit_debit: 150.0`, `max_profit: 150.0`, `max_loss: 150.0`,
+  `breakeven: 730.5`, `probability_positive: 0.7`, `theta_daily: 5.0`, the
+  playbook event flags, a 1-sigma scenario, and the disclaimer. `run` makes
+  exactly one Gemini call. Error paths covered: `422` missing contract or
+  invalid spread, `429` Gemini quota, `502` CBOE outage, `503` missing key.
+  Backend suite: 57 tests, 0 failures
+  (`python -m unittest discover -p "test_*.py"`). `iv_rank` is `null` with an
+  `iv_rank_unavailable` warning by design. Live deterministic check of the PRD
+  example on `XSP 732/729 2026-11-20`: net credit 21.00, max loss 279.00,
+  breakeven 731.79, probability 0.8758, theta 0.72/day. That check exposed and
+  fixed CBOE index handling: `XSP` maps to `_XSP`, and index payloads echo
+  `^XSP` in `data.symbol`. Gemini synthesis is mocked; no live model call was
+  recorded.
 
 ## Phase 4 — Angular dashboard and analysis UI [ ]
 

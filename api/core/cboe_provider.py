@@ -1,7 +1,7 @@
 import re
 import time
 from datetime import date, datetime
-from typing import Final, Literal
+from typing import Final, Literal, NamedTuple
 from urllib.parse import quote
 
 import httpx
@@ -11,8 +11,11 @@ CBOE_OPTIONS_URL: Final = (
     "https://cdn.cboe.com/api/global/delayed_quotes/options/{symbol}.json"
 )
 CBOE_CACHE_TTL_SECONDS: Final = 60.0
-_INDEX_SYMBOLS: Final = frozenset({"SPX", "VIX", "NDX"})
-_OCC_EXPIRATION_PATTERN: Final = re.compile(r"(?P<expiration>\d{6})[CP]\d{8}$")
+_INDEX_SYMBOLS: Final = frozenset({"SPX", "VIX", "NDX", "XSP"})
+_OCC_SYMBOL_PATTERN: Final = re.compile(
+    r"^(?P<root>[A-Z0-9.]+?)(?P<expiration>\d{6})(?P<option_type>[CP])"
+    r"(?P<strike>\d{8})$"
+)
 
 
 class CboePayloadError(RuntimeError):
@@ -68,14 +71,61 @@ class CboeMarketQuote(BaseModel):
     as_of: datetime
 
 
-def option_expiration(option_symbol: str) -> date | None:
-    match = _OCC_EXPIRATION_PATTERN.search(option_symbol)
+class OccSymbol(NamedTuple):
+    root: str
+    expiration: date
+    option_type: Literal["call", "put"]
+    strike: float
+
+
+def parse_occ_symbol(option_symbol: str) -> OccSymbol | None:
+    match = _OCC_SYMBOL_PATTERN.fullmatch(option_symbol.strip().upper())
     if match is None:
         return None
     try:
-        return datetime.strptime(match["expiration"], "%y%m%d").date()
+        expiration = datetime.strptime(match["expiration"], "%y%m%d").date()
     except ValueError:
         return None
+    option_type: Literal["call", "put"] = (
+        "call" if match["option_type"] == "C" else "put"
+    )
+    return OccSymbol(
+        root=match["root"],
+        expiration=expiration,
+        option_type=option_type,
+        strike=int(match["strike"]) / 1000,
+    )
+
+
+def option_expiration(option_symbol: str) -> date | None:
+    parsed = parse_occ_symbol(option_symbol)
+    return parsed.expiration if parsed is not None else None
+
+
+def select_atm_iv(
+    contracts: list[CboeOptionQuote],
+    underlying_price: float | None,
+    expiration: date,
+) -> float | None:
+    if underlying_price is None or underlying_price <= 0:
+        return None
+    best_distance: float | None = None
+    values: list[float] = []
+    for contract in contracts:
+        parsed = parse_occ_symbol(contract.option)
+        if parsed is None or parsed.expiration != expiration:
+            continue
+        if contract.iv is None or contract.iv <= 0:
+            continue
+        distance = abs(parsed.strike - underlying_price)
+        if best_distance is None or distance < best_distance - 1e-9:
+            best_distance = distance
+            values = [contract.iv]
+        elif abs(distance - best_distance) <= 1e-9:
+            values.append(contract.iv)
+    if not values:
+        return None
+    return sum(values) / len(values)
 
 
 def normalize_cboe_symbol(symbol: str) -> str:
@@ -88,6 +138,10 @@ def normalize_cboe_symbol(symbol: str) -> str:
     if has_index_prefix or normalized in _INDEX_SYMBOLS:
         return f"_{normalized}"
     return normalized
+
+
+def _bare_symbol(value: str) -> str:
+    return value.strip().upper().removeprefix("_").removeprefix("^")
 
 
 class CboeOptionsProvider:
@@ -121,8 +175,8 @@ class CboeOptionsProvider:
                 "CBOE returned an invalid options payload."
             ) from error
         if (
-            payload.symbol.upper() != normalized_symbol
-            or payload.data.symbol.upper() != normalized_symbol
+            _bare_symbol(payload.symbol) != _bare_symbol(normalized_symbol)
+            or _bare_symbol(payload.data.symbol) != _bare_symbol(normalized_symbol)
         ):
             raise CboePayloadError("CBOE returned data for an unexpected symbol.")
 
@@ -136,7 +190,7 @@ class CboeOptionsProvider:
     ) -> OptionChainResponse:
         _, payload = await self._get_payload(symbol)
         result = OptionChainResponse(
-            symbol=symbol.strip().upper().removeprefix("_"),
+            symbol=_bare_symbol(symbol),
             contracts=payload.data.options,
             as_of=payload.timestamp,
         )
@@ -171,7 +225,7 @@ class CboeOptionsProvider:
     async def get_market_quote(self, symbol: str) -> CboeMarketQuote:
         _, payload = await self._get_payload(symbol)
         return CboeMarketQuote(
-            symbol=symbol.strip().upper().removeprefix("_"),
+            symbol=_bare_symbol(symbol),
             price=payload.data.current_price,
             change_pct=payload.data.price_change_percent,
             as_of=payload.timestamp,

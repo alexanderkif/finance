@@ -6,6 +6,8 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from agent.graph import AnalysisResult, run_analysis
+from core.cboe_provider import CboePayloadError
 from core.gemini_provider import (
     ExtractedPosition,
     GeminiConfigurationError,
@@ -14,7 +16,9 @@ from core.gemini_provider import (
     GeminiResponseError,
     extract_position,
 )
+from core.metrics import AnalysisPosition
 from core.playbook_registry import PlaybookKey, load_playbooks
+from routers.options import get_options_provider
 
 router = APIRouter()
 _PLAYBOOKS = load_playbooks()
@@ -54,6 +58,14 @@ class ParseRequest(BaseModel):
         if not _SYMBOL_PATTERN.fullmatch(normalized):
             raise ValueError("Default symbol contains invalid characters.")
         return normalized
+
+
+class AnalysisRunRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    position: AnalysisPosition
+    intent: Literal["open", "close", "roll"]
+    detected_language: str = Field(min_length=2, max_length=24)
 
 
 class ParsedLeg(BaseModel):
@@ -182,3 +194,79 @@ async def parse_analysis(
         raise HTTPException(status_code=502, detail=str(error)) from error
     except GeminiResponseError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@router.post(
+    "/api/analysis/run",
+    response_model=AnalysisResult,
+)
+async def run_analysis_endpoint(
+    body: AnalysisRunRequest,
+    request: Request,
+) -> AnalysisResult:
+    client = getattr(request.app.state, "http_client", None)
+    if not isinstance(client, httpx.AsyncClient):
+        raise HTTPException(status_code=503, detail="Analysis service is not ready.")
+
+    legs = body.position.legs
+    if body.position.position_type == "single" and len(legs) != 1:
+        raise HTTPException(
+            status_code=422,
+            detail="A single option position must have exactly one leg.",
+        )
+    if body.position.position_type == "strategy" and len(legs) != 2:
+        raise HTTPException(
+            status_code=422,
+            detail="A strategy position must have exactly two legs.",
+        )
+
+    parsed_legs = [
+        ParsedLeg(
+            symbol=leg.symbol,
+            side=leg.side,
+            option_type=leg.option_type,
+            strike=leg.strike,
+            expiration=leg.expiration,
+        )
+        for leg in legs
+    ]
+    strategy_key = classify_strategy(parsed_legs)
+    if strategy_key is None:
+        raise HTTPException(
+            status_code=422,
+            detail="The legs do not form a supported single option or vertical spread.",
+        )
+
+    try:
+        return await run_analysis(
+            client=client,
+            provider=get_options_provider(request),
+            position=body.position,
+            playbook=_PLAYBOOKS[strategy_key],
+            strategy_key=strategy_key,
+            intent=body.intent,
+            detected_language=body.detected_language,
+        )
+    except GeminiConfigurationError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except GeminiRateLimitError as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
+    except GeminiRequestError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except GeminiResponseError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except httpx.HTTPStatusError as error:
+        status_code = 404 if error.response.status_code == 404 else 502
+        raise HTTPException(
+            status_code=status_code,
+            detail=f"CBOE market provider returned HTTP {error.response.status_code}.",
+        ) from error
+    except httpx.RequestError as error:
+        raise HTTPException(
+            status_code=502,
+            detail="CBOE market data could not be reached.",
+        ) from error
+    except CboePayloadError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
