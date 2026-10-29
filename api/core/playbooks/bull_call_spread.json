@@ -1,0 +1,12 @@
+{
+  "strategy_key": "bull_call_spread",
+  "display_name": "Bull Call Spread",
+  "leg_count": 2,
+  "leg_requirements": ["side", "option_type", "strike", "expiration"],
+  "profit_formula": "Strike width - net debit per share",
+  "loss_formula": "Net debit per share",
+  "breakeven_formula": "Long call strike + net debit per share",
+  "ideal_conditions": ["Moderately bullish outlook", "Defined-risk directional exposure"],
+  "risk_flags": ["Maximum loss is the debit paid", "Early assignment risk on the short call"],
+  "event_sensitivity": {"earnings": true, "dividends": true, "macro": true}
+}

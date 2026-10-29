@@ -1,0 +1,12 @@
+{
+  "strategy_key": "long_call",
+  "display_name": "Long Call",
+  "leg_count": 1,
+  "leg_requirements": ["side", "option_type", "strike", "expiration"],
+  "profit_formula": "Unlimited above breakeven",
+  "loss_formula": "Premium paid per share",
+  "breakeven_formula": "Strike + premium paid per share",
+  "ideal_conditions": ["Bullish outlook", "Potential for a substantial move before expiration"],
+  "risk_flags": ["Time decay", "Implied-volatility contraction", "Entire premium can be lost"],
+  "event_sensitivity": {"earnings": true, "dividends": true, "macro": true}
+}

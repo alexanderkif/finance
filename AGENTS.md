@@ -1,59 +1,52 @@
-You are an expert in TypeScript, Angular, and scalable web application development. You write functional, maintainable, performant, and accessible code following Angular and TypeScript best practices.
+# Repository instructions
 
-## TypeScript Best Practices
+This repository is intended to evolve into the Options Strategy Assistant in
+[PRD.md](PRD.md). The current application is an Angular/FastAPI market
+dashboard; treat the product documents as the target contract, not as evidence
+that a feature already exists. Inspect the implementation before changing it.
 
-- Use strict type checking
-- Prefer type inference when the type is obvious
-- Avoid the `any` type; use `unknown` when type is uncertain
+## Workflow
 
-## Angular Best Practices
+- Keep changes within [PRD.md](PRD.md). For phase work, follow
+  [PLAN.md](PLAN.md) and [TODO.md](TODO.md) in order; stop at each gate until
+  its stated evidence is available.
+- Load [ARCHITECTURE.md](ARCHITECTURE.md) when changing service boundaries,
+  routing, or deployment; [DATA_CONTRACT.md](DATA_CONTRACT.md) for providers,
+  market data, or degradation; [PLAYBOOK_SPEC.md](PLAYBOOK_SPEC.md) for
+  strategies, parsing, or playbooks; [API_SPEC.md](API_SPEC.md) for endpoint
+  behavior or schemas; and [src/AGENTS.md](src/AGENTS.md) when changing the
+  Angular frontend.
+- Keep each contract authoritative in its own document. Update directly
+  related documentation and the phase tracker when behavior or phase status
+  changes.
+- A full rewrite or replacement of the existing application is allowed when
+  it best meets the product contract. Do not preserve legacy code solely for
+  backward compatibility; keep deployment behavior working or update and
+  verify its configuration.
+- Use the Google Gemini `gemini-3.1-flash-lite` model on the free tier for
+  now. Read `GEMINI_API_KEY` from the server environment, using the local
+  `.env.local` for development and deployment environment settings in
+  production. Never expose or log the key in client code, responses, or docs.
 
-- Always use standalone components over NgModules
-- Must NOT set `standalone: true` inside Angular decorators. It's the default in Angular v20+.
-- Do NOT set `changeDetection: ChangeDetectionStrategy.OnPush` explicitly. `OnPush` is the default in Angular v22+.
-- Use signals for state management
-- Implement lazy loading for feature routes
-- Do NOT use the `@HostBinding` and `@HostListener` decorators. Put host bindings inside the `host` object of the `@Component` or `@Directive` decorator instead
-- Use `NgOptimizedImage` for all static images.
-  - `NgOptimizedImage` does not work for inline base64 images.
+## Product guardrails
 
-## Accessibility Requirements
+- Do not present recommendations as financial advice. Analysis is educational.
+- Keep all financial arithmetic deterministic and outside LLM prompts.
+- Never fabricate market data or imply delayed data is real-time.
+- Do not add authentication, accounts, a database, or WebSockets.
+- Do not present placeholders as working implementations.
+- Verify CBOE fields against the real provider payload and
+  [DATA_CONTRACT.md](DATA_CONTRACT.md); do not guess field names. If in-scope
+  work remains unimplemented, report it as incomplete and use
+  `NotImplementedError("see TODO.md Phase N")` rather than a working-looking
+  stub.
 
-- It MUST pass all AXE checks.
-- It MUST follow all WCAG AA minimums, including focus management, color contrast, and ARIA attributes.
+## Implementation conventions
 
-## Components
-
-- Keep components small and focused on a single responsibility
-- Use `input()` and `output()` functions instead of decorators
-- Use `model()` for two-way bound properties with `[(prop)]` syntax instead of pairing `input()` with `output()`
-- Use `computed()` for derived state
-- Use `linkedSignal()` for state derived from multiple reactive sources that must stay synchronized
-- Prefer inline templates for small components
-- Prefer Signal Forms (`@angular/forms/signals`) for new forms. They are stable in Angular v22+ and provide signal-based state, type-safe field access, and schema-based validation
-- When not using Signal Forms, prefer Reactive forms instead of Template-driven ones
-- Do NOT use `ngClass`, use `class` bindings instead
-- Do NOT use `ngStyle`, use `style` bindings instead
-- Do NOT import `CommonModule`, import only the directives and pipes the template uses, such as `AsyncPipe` or `DatePipe`
-- When using external templates/styles, use paths relative to the component TS file.
-
-## State Management
-
-- Use signals for local component state
-- Use `computed()` for derived state
-- Keep state transformations pure and predictable
-- Do NOT use `mutate` on signals, use `update` or `set` instead
-
-## Templates
-
-- Keep templates simple and avoid complex logic
-- Use native control flow (`@if`, `@for`, `@switch`) instead of `*ngIf`, `*ngFor`, `*ngSwitch`
-- Use the async pipe to handle observables
-- Do not assume globals like (`new Date()`) are available.
-
-## Services
-
-- Design services around a single responsibility
-- Use the `providedIn: 'root'` option for singleton services
-- Prefer the `@Service` decorator over `@Injectable({providedIn: 'root'})` for new singleton services (Angular v22+)
-- Use the `inject()` function instead of constructor injection
+- Follow the repository's configured Angular and Python versions and existing
+  patterns. For Angular, favor standalone APIs, signals, typed forms, built-in
+  template control flow, and accessible WCAG AA interactions.
+- Keep TypeScript strict; avoid `any`. Use explicit types and validation at
+  API boundaries.
+- Validate changes with the smallest relevant configured test or build
+  command. Add or update tests for changed behavior.

@@ -8,6 +8,10 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, JsonValue
 
+from routers.analysis import router as analysis_router
+from routers.market import router as market_router
+from routers.options import router as options_router
+
 YAHOO_BASE_URL_Q1: Final = "https://query1.finance.yahoo.com"
 YAHOO_BASE_URL_Q2: Final = "https://query2.finance.yahoo.com"
 
@@ -87,6 +91,9 @@ app: Final = FastAPI(
     openapi_url="/api/openapi.json",
     lifespan=lifespan,
 )
+app.include_router(options_router)
+app.include_router(market_router)
+app.include_router(analysis_router)
 
 
 def get_http_client(request: Request) -> httpx.AsyncClient:

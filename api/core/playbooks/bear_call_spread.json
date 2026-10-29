@@ -1,0 +1,12 @@
+{
+  "strategy_key": "bear_call_spread",
+  "display_name": "Bear Call Spread",
+  "leg_count": 2,
+  "leg_requirements": ["side", "option_type", "strike", "expiration"],
+  "profit_formula": "Net credit per share",
+  "loss_formula": "Strike width - net credit per share",
+  "breakeven_formula": "Short call strike + net credit per share",
+  "ideal_conditions": ["Neutral to bearish outlook", "Range-bound or falling underlying"],
+  "risk_flags": ["Maximum loss occurs at or above the long call strike", "Early assignment risk on the short call"],
+  "event_sensitivity": {"earnings": true, "dividends": true, "macro": true}
+}

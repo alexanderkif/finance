@@ -1,7 +1,10 @@
 # Finance
 
-Angular 22 SSR frontend and FastAPI backend, deployed together as Vercel
-Services. The service roots and `/api` routing are configured in `vercel.json`.
+Options Strategy Assistant: an Angular 22 SSR frontend and FastAPI backend,
+deployed together as Vercel Services. The frontend is being rewritten around a
+dashboard for a selected instrument, a candlestick chart, and an AI chat; the
+legacy Yahoo Finance dashboard is not part of the target product. The service
+roots and `/api` routing are configured in `vercel.json`.
 
 ## Локальный запуск
 
@@ -18,13 +21,15 @@ vercel dev
 Примеры API:
 
 ```text
-http://localhost:3000/api/search?q=MSFT
-http://localhost:3000/api/candles/MSFT?range=1mo&interval=1d
+http://localhost:3000/api/market/SPY
+http://localhost:3000/api/options/chain/SPY
 http://localhost:3000/api/docs
 ```
 
 Swagger UI is available at `/api/docs`; ReDoc is at `/api/redoc`, and the
-OpenAPI schema is at `/api/openapi.json`.
+OpenAPI schema is at `/api/openapi.json`. The legacy `/api/candles`,
+`/api/insights`, and `/api/search` endpoints still exist but are Yahoo
+Finance-backed and are scheduled for removal in Phase 4.
 
 Если команда `vercel` ещё не установлена, установите Vercel CLI командой
 `npm install -g vercel`. Репозиторий должен быть связан с Vercel-проектом командой
@@ -62,10 +67,19 @@ npm test
 
 ## Dashboard
 
-The home page starts with AAPL. Search by ticker or company name, choose a
-matching result, and switch chart history from one month to five years. The
-dashboard combines daily candles and volume with technical insights and
-Yahoo Finance headlines.
+The target dashboard opens on SPY and is organised top to bottom:
 
-The FastAPI routes are `/api/candles/{ticker}`, `/api/insights/{ticker}`, and
-`/api/search?q=...`; their response schemas are declared in `api/index.py`.
+1. A responsive card grid with the instrument selector, current price and
+   change, support/resistance, brief market context, and one to three news
+   headline links.
+2. A candlestick chart with user-added trend lines and SMA/RSI indicators.
+3. The AI chat for describing an option position or spread.
+4. Secondary content below those blocks.
+
+The UI supports light and dark themes; the theme and selected instrument are
+persisted in `localStorage`. Market data is delayed and must be labelled
+**Delayed 15 min**. Unavailable data is shown as an explicit empty state, never
+as a fabricated value.
+
+The current page still renders the legacy Yahoo Finance dashboard with AAPL as
+its starting ticker; it does not meet this contract until Phase 4 is finished.

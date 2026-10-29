@@ -1,0 +1,12 @@
+{
+  "strategy_key": "short_put",
+  "display_name": "Short Put",
+  "leg_count": 1,
+  "leg_requirements": ["side", "option_type", "strike", "expiration"],
+  "profit_formula": "Premium received per share",
+  "loss_formula": "Strike - premium received per share, assuming the underlying cannot fall below zero",
+  "breakeven_formula": "Strike - premium received per share",
+  "ideal_conditions": ["Neutral to bullish outlook", "Cash-secured or buying power is confirmed"],
+  "risk_flags": ["Substantial loss if the underlying falls", "Margin requirement", "Early assignment risk"],
+  "event_sensitivity": {"earnings": true, "dividends": true, "macro": true}
+}
