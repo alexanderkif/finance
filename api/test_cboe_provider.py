@@ -1,8 +1,7 @@
 import unittest
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import httpx
-
 from core.cboe_provider import (
     CboeOptionsProvider,
     CboePayloadError,
@@ -52,16 +51,14 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
             )
             return httpx.Response(200, json=cboe_payload())
 
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(handler)
-        ) as client:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             chain = await CboeOptionsProvider(client).get_chain("spy")
 
         self.assertEqual(chain.symbol, "SPY")
         self.assertEqual(chain.source, "cboe_delayed")
         self.assertEqual(
             chain.as_of,
-            datetime(2026, 10, 28, 15, 48, 15, tzinfo=timezone.utc),
+            datetime(2026, 10, 28, 15, 48, 15, tzinfo=UTC),
         )
         self.assertEqual(len(chain.contracts), 1)
         self.assertEqual(chain.contracts[0].option, "SPY261120P00732000")
@@ -91,9 +88,7 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
                 ),
             )
 
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(handler)
-        ) as client:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             chain = await CboeOptionsProvider(client).get_chain("XSP")
 
         self.assertEqual(chain.symbol, "XSP")
@@ -107,9 +102,7 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
             )
             return httpx.Response(200, json=cboe_payload())
 
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(handler)
-        ) as client:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             quote = await CboeOptionsProvider(client).get_market_quote("SPY")
 
         self.assertEqual(quote.symbol, "SPY")
@@ -138,9 +131,7 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
             )
             return httpx.Response(200, json=cboe_payload(options=options))
 
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(handler)
-        ) as client:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             chain = await CboeOptionsProvider(client).get_chain(
                 "SPY",
                 date(2026, 11, 20),
@@ -167,9 +158,7 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
                 )
             return httpx.Response(200, json=cboe_payload())
 
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(handler)
-        ) as client:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             chain = await CboeOptionsProvider(client).get_chain("SPY")
 
         self.assertEqual(requested_hosts, ["cdn.cboe.com", "cdn-api.cboe.com"])
@@ -187,9 +176,7 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
             request_count += 1
             return httpx.Response(200, json=cboe_payload())
 
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(handler)
-        ) as client:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             provider = CboeOptionsProvider(client)
             first = await provider.get_chain("SPY")
             second = await provider.get_chain("SPY")
@@ -209,9 +196,7 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
             requests += 1
             return httpx.Response(503)
 
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(handler)
-        ) as client:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             provider = CboeOptionsProvider(client)
             for _ in range(2):
                 with self.assertRaises(httpx.HTTPStatusError):
@@ -227,9 +212,7 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
             )
             return httpx.Response(200, json=cboe_payload("QQQ"))
 
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(handler)
-        ) as client:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with self.assertRaisesRegex(CboePayloadError, "unexpected symbol"):
                 await CboeOptionsProvider(client).get_chain("SPY")
 
@@ -243,9 +226,7 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
             )
             return httpx.Response(200, json=payload)
 
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(handler)
-        ) as client:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with self.assertRaises(CboePayloadError):
                 await CboeOptionsProvider(client).get_chain("SPY")
 

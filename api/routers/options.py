@@ -2,13 +2,12 @@ from datetime import date
 from typing import Annotated
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Request
-
 from core.cboe_provider import (
     CboeOptionsProvider,
     CboePayloadError,
     OptionChainResponse,
 )
+from fastapi import APIRouter, HTTPException, Query, Request
 
 router = APIRouter()
 

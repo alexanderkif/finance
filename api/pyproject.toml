@@ -7,3 +7,6 @@ dependencies = [
     "httpx[http2]==0.28.1",
     "python-dotenv==1.2.4"
 ]
+
+[dependency-groups]
+dev = ["mcp>=2,<3"]

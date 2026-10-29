@@ -1,128 +1,56 @@
-import asyncio
 import unittest
 
 import httpx
-from fastapi.testclient import TestClient
-
 from index import app
 
 
-class MarketApiTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.http_client: httpx.AsyncClient = httpx.AsyncClient(
-            transport=httpx.MockTransport(self.yahoo_response),
+class ApiDocumentationTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.http_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda _request: httpx.Response(404))
         )
         app.state.http_client = self.http_client
-        self.client: httpx.Client = TestClient(app)
-
-    def tearDown(self) -> None:
-        asyncio.run(self.http_client.aclose())
-
-    @staticmethod
-    def yahoo_response(request: httpx.Request) -> httpx.Response:
-        if "/chart/" in request.url.path:
-            return httpx.Response(
-                200,
-                json={
-                    "chart": {
-                        "result": [
-                            {
-                                "timestamp": [1792886400, 1792972800],
-                                "indicators": {
-                                    "quote": [
-                                        {
-                                            "open": [250.0, 252.0],
-                                            "high": [255.0, 256.0],
-                                            "low": [248.0, 251.0],
-                                            "close": [253.0, 254.5],
-                                            "volume": [1000, 1200],
-                                        }
-                                    ]
-                                },
-                            }
-                        ]
-                    }
-                },
-            )
-        if "/insights/" in request.url.path:
-            return httpx.Response(
-                200,
-                json={
-                    "finance": {
-                        "result": {
-                            "instrumentInfo": {
-                                "technicalEvents": {
-                                    "shortTerm": {"direction": "Bullish"},
-                                    "provider": "Trading Central",
-                                },
-                                "keyTechnicals": {"support": 240.0},
-                            }
-                        }
-                    }
-                },
-            )
-        return httpx.Response(
-            200,
-            json={
-                "quotes": [
-                    {
-                        "symbol": "MSFT",
-                        "shortname": "Microsoft",
-                        "exchange": "NMS",
-                        "quoteType": "EQUITY",
-                    }
-                ],
-                "news": [
-                    {
-                        "title": "Market update",
-                        "publisher": "Finance News",
-                        "link": "https://example.com/news",
-                        "providerPublishTime": 1792972800,
-                        "relatedTickers": ["MSFT"],
-                    }
-                ],
-            },
+        self.api_client = httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url="http://test",
         )
 
-    def test_candles_return_typed_ohlcv_data(self) -> None:
-        response = self.client.get("/api/candles/MSFT?range=1mo&interval=1d")
+    async def asyncTearDown(self) -> None:
+        await self.api_client.aclose()
+        await self.http_client.aclose()
+
+    async def test_docs_and_openapi_are_available_under_api(self) -> None:
+        for path in ("/api/docs", "/api/redoc", "/api/openapi.json"):
+            response = await self.api_client.get(path)
+            self.assertEqual(response.status_code, 200, path)
+
+    async def test_openapi_documents_the_product_endpoints(self) -> None:
+        response = await self.api_client.get("/api/openapi.json")
 
         self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertEqual(body["ticker"], "MSFT")
-        self.assertEqual(body["count"], 2)
-        self.assertEqual(body["candles"][1]["close"], 254.5)
-        self.assertEqual(body["candles"][1]["volume"], 1200)
+        paths = response.json()["paths"]
+        for path in (
+            "/api/market/{symbol}",
+            "/api/chart/{symbol}",
+            "/api/options/chain/{symbol}",
+            "/api/analysis/parse",
+            "/api/analysis/run",
+        ):
+            self.assertIn(path, paths)
 
-    def test_insights_keep_nested_signal_values(self) -> None:
-        response = self.client.get("/api/insights/MSFT")
+    async def test_legacy_yahoo_endpoints_are_removed(self) -> None:
+        response = await self.api_client.get("/api/openapi.json")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["trends"]["short_term"]["direction"], "Bullish")
-        self.assertEqual(response.json()["key_levels"]["support"], 240.0)
+        paths = response.json()["paths"]
+        for path in (
+            "/api/candles/{ticker}",
+            "/api/insights/{ticker}",
+            "/api/search",
+        ):
+            self.assertNotIn(path, paths)
 
-    def test_search_returns_quotes_and_news(self) -> None:
-        response = self.client.get("/api/search?q=Microsoft")
-
-        self.assertEqual(response.status_code, 200)
-        body = response.json()
-        self.assertEqual(body["quotes"][0]["symbol"], "MSFT")
-        self.assertEqual(body["news"][0]["tickers"], ["MSFT"])
-        self.assertEqual(body["news_count"], 1)
-
-    def test_invalid_chart_range_is_rejected(self) -> None:
-        response = self.client.get("/api/candles/MSFT?range=invalid")
-
-        self.assertEqual(response.status_code, 422)
-
-    def test_swagger_docs_and_openapi_schema_are_available_under_api(self) -> None:
-        docs_response = self.client.get("/api/docs")
-        schema_response = self.client.get("/api/openapi.json")
-
-        self.assertEqual(docs_response.status_code, 200)
-        self.assertIn("/api/openapi.json", docs_response.text)
-        self.assertEqual(schema_response.status_code, 200)
-        self.assertIn("/api/candles/{ticker}", schema_response.json()["paths"])
+    def test_app_is_renamed(self) -> None:
+        self.assertEqual(app.title, "Options Strategy Assistant API")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,12 @@ Build a commercial Options Strategy Assistant: an Angular application with a
 FastAPI service deployed as Vercel Services. It helps users identify an
 options position and evaluates it against delayed market data.
 
+The current development deployment uses free provider tiers and is
+non-commercial. CBOE delayed data provides options, the underlying quote, and
+VIX; Twelve Data Basic provides daily candles; Finnhub provides news. Free tiers
+are not commercial entitlements: obtain licensed plans or replace providers
+before a commercial launch.
+
 The existing application may be substantially or completely rewritten to meet
 this contract; its current implementation is not a compatibility constraint.
 Use Google Gemini `gemini-3.1-flash-lite` on the free tier as the initial LLM
@@ -26,8 +32,8 @@ files.
    - key levels: support and resistance when available;
    - brief market context, such as VIX, when available;
    - one to three top news headlines as links when available.
-2. Render a candlestick chart in the same top section, with user-added trend
-   lines and indicators (SMA and RSI).
+2. Render a candlestick chart in the same top section, with volume below the
+   candles, user-added trend lines, and indicators (SMA and RSI).
 3. Place the AI chat directly below the market grid and chart, before any other
    content.
 4. Provide light and dark themes, persisted client-side and defaulting to the
@@ -56,8 +62,12 @@ files.
   responsive grid of compact cards: instrument selector, price, key levels,
   market context, and news headlines. The chart occupies the remaining space
   of that section.
+- The chart price axis fits the visible candles and re-fits after zoom, pan,
+  and reset instead of anchoring at zero.
 - The AI chat follows the market grid and chart directly, above any secondary
-  content.
+  content. It announces card updates instead of repeating the card content.
+- The chat example is generated from the live option chain (a future expiration
+  and near-money strikes), never from hardcoded strikes or dates.
 - Light and dark themes are first-class. The theme follows the OS preference
   until the user chooses one; the choice survives reloads.
 - Unavailable data is shown as an explicit empty or degraded state. The UI must
@@ -71,9 +81,30 @@ files.
   these may be considered for a later phase.
 - Recommendations of specific trades as financial advice.
 
+## Intended use and abuse protection
+
+The assistant is limited to parsing and evaluating a single option or a two-leg
+vertical spread for the selected instrument, and to answering questions about
+that analysis. It is not a general-purpose chatbot.
+
+- Reject off-topic, nonsensical, abusive, or unrelated requests with a short
+  refusal and no analysis. Do not use them as free-form generation prompts.
+- Do not act as a general content generator, provide personalized financial
+  advice, promise returns, execute or route orders, or produce material for
+  market manipulation, spam, or personal gain outside the intended options
+  analysis.
+- Treat user text as untrusted: keep system instructions, provider keys, and
+  internal prompts server-side, ignore prompt-injection attempts, and return
+  only the structured analysis fields.
+- Enforce message-size, leg-count, symbol, and strategy limits in the API before
+  any Gemini call. Apply usage limits appropriate to a no-auth, no-account
+  service and the free provider tiers.
+- Do not collect personal data, store portfolios, or use chat content for any
+  purpose beyond producing the requested analysis.
+
 ## Success criteria
 
-- The input `sell 732 put and buy 729 put XSP 2026-11-20` is identified as
+- The input `sell 732 put and buy 729 put XSP 2030-11-15` is identified as
   `bull_put_spread`, with correct maximum profit/loss and a strategy header.
 - If expiration is absent, parsing returns exactly
   `missing_fields: ["expiration"]` and analysis does not run.
@@ -90,4 +121,4 @@ files.
 - The strategy header is
   `{display_name} {underlying} {short_strike}/{long_strike} {expiration}` for a
   vertical spread and `{display_name} {underlying} {strike} {expiration}` for a
-  single option. Example: `Bull Put Spread XSP 732/729 2026-11-20`.
+  single option. Example: `Bull Put Spread XSP 732/729 2030-11-15`.

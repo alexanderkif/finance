@@ -3,7 +3,6 @@ from typing import Final, Literal, cast
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-
 from settings import GEMINI_MODEL, require_gemini_api_key
 
 _GEMINI_API_URL: Final = (

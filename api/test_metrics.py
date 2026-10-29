@@ -1,6 +1,6 @@
+import unittest
 from datetime import date
 from typing import Literal, cast
-import unittest
 
 from core.metrics import (
     LegQuote,
@@ -12,8 +12,8 @@ from core.metrics import (
 )
 from core.playbook_registry import load_playbooks
 
-EXPIRATION = date(2026, 11, 20)
-AS_OF = date(2026, 10, 29)
+EXPIRATION = date(2030, 11, 15)
+AS_OF = date(2030, 10, 24)
 PLAYBOOKS = load_playbooks()
 
 
@@ -90,9 +90,7 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics.theta_daily, 5.0)
         self.assertIsNone(metrics.iv_rank)
         self.assertIn("iv_rank_unavailable", metrics.warnings)
-        self.assertEqual(
-            metrics.event_flags, ["earnings", "dividends", "macro"]
-        )
+        self.assertEqual(metrics.event_flags, ["earnings", "dividends", "macro"])
         self.assertEqual(metrics.liquidity.bid_ask_spread_pct, 12.5)
         self.assertEqual(metrics.liquidity.open_interest, 800)
         self.assertEqual(metrics.liquidity.volume, 400)
@@ -274,11 +272,11 @@ class MetricsTests(unittest.TestCase):
 
         self.assertEqual(
             format_header("Bull Put Spread", spread),
-            "Bull Put Spread XSP 732/729 2026-11-20",
+            "Bull Put Spread XSP 732/729 2030-11-15",
         )
         self.assertEqual(
             format_header("Long Call", [single]),
-            "Long Call SPY 600 2026-11-20",
+            "Long Call SPY 600 2030-11-15",
         )
 
 

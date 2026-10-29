@@ -77,25 +77,59 @@ Update `CHANGELOG_LATEST.md` with each completed phase.
 
 ## Phase 4 — Angular dashboard and analysis UI [ ]
 
-- [ ] Decide the data source for candles, news, key levels, and market context,
-      or commit to explicit unavailable states for those panels.
-- [ ] Rewrite the Angular frontend; remove the legacy AAPL dashboard and Yahoo
+- [x] Select data sources: Twelve Data Basic for candles, Finnhub free for
+      news, CBOE delayed for quote/VIX. Non-commercial tiers; licensed plans
+      are required before a commercial launch.
+- [x] Add `GET /api/chart/{symbol}` with Twelve Data candles, SMA 20/50,
+      RSI 14, and deterministic pivot support/resistance.
+- [x] Rework `GET /api/market/{symbol}` to combine CBOE quote, CBOE VIX, and
+      Finnhub news with independent degradation and per-section sources.
+- [x] Rewrite the Angular frontend; remove the legacy AAPL dashboard and Yahoo
       Finance data services.
-- [ ] Add the top dashboard grid: instrument selector defaulting to SPY and
+- [x] Add the top dashboard grid: instrument selector defaulting to SPY and
       persisted in `localStorage`, price and change, support/resistance, brief
       market context, and 1–3 news headline links.
-- [ ] Add light and dark themes, persisted client-side, defaulting to the OS
+- [x] Add light and dark themes, persisted client-side, defaulting to the OS
       preference, applied before hydration.
-- [ ] Install `ng-apexcharts` and render candlesticks with API-provided SMA/RSI
+- [x] Install `ng-apexcharts` and render candlesticks with API-provided SMA/RSI
       indicators.
-- [ ] Implement user-added trend lines as an overlay synchronized to the
-      ApexCharts canvas.
-- [ ] Place the AI chat directly below the market grid and chart.
-- [ ] Add the accessible chart fallback (keyboard-reachable summary or table).
-- [ ] Remove the legacy Yahoo Finance endpoints and rename the FastAPI app.
-- [ ] Verify the complete browser flow on `vercel dev`.
-- **GATE 4:** theme switch, SPY selection, trend line, indicator, chat spread
-  submission, and analysis card all work on `vercel dev`.
+- [x] Scale the chart price axis to the visible candles and re-fit it after
+      zoom, pan, and reset.
+- [x] Move support/resistance labels to the left, share the muted accessible
+      palette with the Key levels panel, reduce tick/marker density, and
+      shorten axis level labels.
+- [x] Brighten candles and indicators relative to support/resistance, add a
+      volume histogram under the candles, and render Key levels as matching
+      rounded colored pills.
+- [x] Implement user-added trend lines as extra line series synchronized to the
+      chart's datetime axis.
+- [x] Place the AI chat directly below the market grid and chart, with an
+      intent selector and missing-field prompts.
+- [x] Generate the chat example from the live chain: a future expiration and
+      near-money strikes from the current CBOE chain, with a readable
+      explanation.
+- [x] Keep the assistant chat message short instead of repeating the analysis
+      card content.
+- [x] Add the accessible chart fallback (keyboard-reachable data table).
+- [x] Load XSP and VIX candles from CBOE daily index history without a paid
+      Twelve Data plan; hide the volume pane when the source has no volume.
+- [x] Remove the legacy Yahoo Finance endpoints and rename the FastAPI app.
+- [x] Configure real `TWELVE_DATA_API_KEY` and `FINNHUB_API_KEY` values and
+      verify the live market, chart, parse, and run endpoints.
+- [ ] Verify the chart interaction, theme switch, and chat analysis card in a
+      browser on `vercel dev`.
+- **GATE 4:** partially verified on 2026-10-29. `vercel dev` served `/` (200,
+  title "Options Strategy Assistant"), `/api/docs` (200),
+  `/api/market/SPY` (live CBOE price 767.65 and three Finnhub headlines),
+  `/api/chart/SPY?range=6mo` (132 Twelve Data candles with volume, two SMA
+  series, 118 RSI points, three support levels), `/api/chart/XSP?range=6mo`
+  (132 CBOE daily-history candles, `source: "cboe_index_history"`,
+  `volume_unavailable`), and the full analysis flow: the PRD example parsed to
+  `bull_put_spread` and `run` returned `Bull Put Spread XSP 732/729
+  2026-11-20`, probability 0.8624, max loss 276.00, breakeven 731.76. Backend:
+  75 tests pass. Frontend: 28 tests pass and the production build succeeds. The
+  browser interaction gate (chart render, trend line, theme switch, and
+  analysis card in a real browser) remains open.
 
 ## Phase 5 — Degradation and tests [ ]
 
@@ -105,3 +139,23 @@ Update `CHANGELOG_LATEST.md` with each completed phase.
 - [ ] Run all relevant backend and frontend tests.
 - [ ] Update `CHANGELOG_LATEST.md` with verified results.
 - **GATE 5:** all tests pass and mocked CBOE 503 degradation is demonstrated.
+
+## Phase 6 — Chat scope and misuse guardrails [ ]
+
+- [ ] Document the allowed chat scope and state that the assistant is not a
+      general-purpose chatbot.
+- [ ] Add message-size, leg-count, symbol, and strategy validation before any
+      Gemini call.
+- [ ] Add a deterministic pre-LLM scope check that refuses off-topic,
+      nonsensical, abusive, and prompt-injection requests with a short message
+      and no analysis card.
+- [ ] Keep system instructions, provider keys, and internal prompts server-side,
+      never echo them, and validate Gemini output against the schema.
+- [ ] Add tests for off-topic requests, prompt injection, oversized input,
+      unsupported symbols or strategies, secret leakage, and no Gemini call on
+      refused requests.
+- [ ] Document that the service must not be repurposed for unrelated content
+      generation, personalized financial advice, trade execution, market
+      manipulation, spam, or other personal use outside the intended product.
+- **GATE 6:** all guardrail tests pass, refused requests make no Gemini call,
+  and responses expose no secrets or internal instructions.

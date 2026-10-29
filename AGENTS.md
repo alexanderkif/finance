@@ -40,6 +40,10 @@ that a feature already exists. Inspect the implementation before changing it.
   work remains unimplemented, report it as incomplete and use
   `NotImplementedError("see TODO.md Phase N")` rather than a working-looking
   stub.
+- The current market-data providers are free, non-commercial tiers: CBOE
+  delayed, Twelve Data Basic, and Finnhub free. Do not present the application
+  as commercially licensed; a commercial launch requires licensed plans or
+  replacement providers. Keep provider keys server-side.
 
 ## Implementation conventions
 

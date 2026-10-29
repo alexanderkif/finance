@@ -1,14 +1,17 @@
 import re
 import time
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Final, Literal, NamedTuple
 from urllib.parse import quote
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 CBOE_OPTIONS_URL: Final = (
     "https://cdn.cboe.com/api/global/delayed_quotes/options/{symbol}.json"
+)
+CBOE_QUOTE_URL: Final = (
+    "https://cdn.cboe.com/api/global/delayed_quotes/quotes/{symbol}.json"
 )
 CBOE_CACHE_TTL_SECONDS: Final = 60.0
 _INDEX_SYMBOLS: Final = frozenset({"SPX", "VIX", "NDX", "XSP"})
@@ -16,6 +19,12 @@ _OCC_SYMBOL_PATTERN: Final = re.compile(
     r"^(?P<root>[A-Z0-9.]+?)(?P<expiration>\d{6})(?P<option_type>[CP])"
     r"(?P<strike>\d{8})$"
 )
+
+
+def _utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 class CboePayloadError(RuntimeError):
@@ -53,6 +62,32 @@ class _CboeOptionsPayload(BaseModel):
     symbol: str
     data: _CboeOptionsData
 
+    @field_validator("timestamp")
+    @classmethod
+    def normalize_timestamp(cls, value: datetime) -> datetime:
+        return _utc(value)
+
+
+class _CboeQuoteData(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    symbol: str
+    current_price: float | None = None
+    price_change_percent: float | None = None
+
+
+class _CboeQuotePayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    timestamp: datetime
+    symbol: str
+    data: _CboeQuoteData
+
+    @field_validator("timestamp")
+    @classmethod
+    def normalize_timestamp(cls, value: datetime) -> datetime:
+        return _utc(value)
+
 
 class OptionChainResponse(BaseModel):
     symbol: str
@@ -64,6 +99,14 @@ class OptionChainResponse(BaseModel):
 
 
 class CboeMarketQuote(BaseModel):
+    symbol: str
+    price: float | None
+    change_pct: float | None
+    source: Literal["cboe_delayed"] = "cboe_delayed"
+    as_of: datetime
+
+
+class CboeIndexQuote(BaseModel):
     symbol: str
     price: float | None
     change_pct: float | None
@@ -153,6 +196,7 @@ class CboeOptionsProvider:
         self._client = client
         self._cache_ttl_seconds = cache_ttl_seconds
         self._cache: dict[str, tuple[float, _CboeOptionsPayload]] = {}
+        self._quote_cache: dict[str, tuple[float, _CboeQuotePayload]] = {}
 
     async def _get_payload(self, symbol: str) -> tuple[str, _CboeOptionsPayload]:
         normalized_symbol = normalize_cboe_symbol(symbol)
@@ -174,10 +218,9 @@ class CboeOptionsProvider:
             raise CboePayloadError(
                 "CBOE returned an invalid options payload."
             ) from error
-        if (
-            _bare_symbol(payload.symbol) != _bare_symbol(normalized_symbol)
-            or _bare_symbol(payload.data.symbol) != _bare_symbol(normalized_symbol)
-        ):
+        if _bare_symbol(payload.symbol) != _bare_symbol(
+            normalized_symbol
+        ) or _bare_symbol(payload.data.symbol) != _bare_symbol(normalized_symbol):
             raise CboePayloadError("CBOE returned data for an unexpected symbol.")
 
         self._cache[normalized_symbol] = (time.monotonic(), payload)
@@ -208,8 +251,10 @@ class CboeOptionsProvider:
 
         warnings = (
             [
-                f"Excluded {unrecognized_symbols} contracts with unrecognized "
-                "option symbols from the expiration filter."
+                (
+                    f"Excluded {unrecognized_symbols} contracts with unrecognized "
+                    "option symbols from the expiration filter."
+                )
             ]
             if unrecognized_symbols
             else []
@@ -226,6 +271,38 @@ class CboeOptionsProvider:
         _, payload = await self._get_payload(symbol)
         return CboeMarketQuote(
             symbol=_bare_symbol(symbol),
+            price=payload.data.current_price,
+            change_pct=payload.data.price_change_percent,
+            as_of=payload.timestamp,
+        )
+
+    async def get_index_quote(self, symbol: str) -> CboeIndexQuote:
+        normalized_symbol = normalize_cboe_symbol(symbol)
+        cached = self._quote_cache.get(normalized_symbol)
+        now = time.monotonic()
+        if cached is not None and now - cached[0] < self._cache_ttl_seconds:
+            payload = cached[1]
+        else:
+            url_symbol = quote(normalized_symbol, safe="_")
+            response = await self._client.get(
+                CBOE_QUOTE_URL.format(symbol=url_symbol),
+                follow_redirects=True,
+            )
+            response.raise_for_status()
+            try:
+                payload = _CboeQuotePayload.model_validate(response.json())
+            except (ValidationError, ValueError) as error:
+                raise CboePayloadError(
+                    "CBOE returned an invalid quote payload."
+                ) from error
+            if _bare_symbol(payload.symbol) != _bare_symbol(
+                normalized_symbol
+            ) or _bare_symbol(payload.data.symbol) != _bare_symbol(normalized_symbol):
+                raise CboePayloadError("CBOE returned data for an unexpected symbol.")
+            self._quote_cache[normalized_symbol] = (time.monotonic(), payload)
+
+        return CboeIndexQuote(
+            symbol=_bare_symbol(normalized_symbol),
             price=payload.data.current_price,
             change_pct=payload.data.price_change_percent,
             as_of=payload.timestamp,

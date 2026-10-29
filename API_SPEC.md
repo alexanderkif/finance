@@ -13,18 +13,36 @@ Unavailable values are explicit; see [DATA_CONTRACT.md](DATA_CONTRACT.md).
   reported explicitly; do not silently substitute another model.
 - Never return, log, or expose the API key to the browser.
 
+## Provider configuration
+
+- `TWELVE_DATA_API_KEY` enables daily candles, indicators, and chart levels.
+- `FINNHUB_API_KEY` enables news headlines.
+- `GEMINI_API_KEY` enables parsing and synthesis.
+- All keys are server-side only. Local development reads them from the
+  repository-root `.env.local`; production reads deployment environment
+  settings.
+- Free tiers are used for non-commercial development. Do not launch
+  commercially without licensed plans.
+
 ## `GET /api/market/{symbol}`
 
 Response fields:
 
 ```text
-symbol, price, change_pct, support[], resistance[], vix, news[],
-source, as_of, degraded, warnings[]
+symbol, price, change_pct, vix, news[], sources, as_of,
+quote_as_of, vix_as_of, news_as_of, degraded, warnings[]
 ```
 
-The endpoint returns CBOE-backed price/change data when available. Missing
-support/resistance, VIX, and news are represented as empty or null values with
-`degraded: true` and explicit warnings; they are never synthesized.
+- `price` and `change_pct` come from the CBOE delayed quote.
+- `vix` comes from the CBOE delayed `_VIX` quote.
+- `news` contains up to three Finnhub headlines, newest first:
+  `{title, url, publisher, published_at}`.
+- `sources` is `{quote, vix, news}` with the provider name or `null` for each
+  section.
+- `as_of` is the newest available section timestamp; per-section timestamps are
+  returned separately.
+- Sections degrade independently. Missing quote, VIX, or news never blocks the
+  others; the response is `200` with `degraded: true` and warnings.
 
 ## `GET /api/chart/{symbol}?range=6mo&interval=1d`
 
@@ -34,14 +52,26 @@ Response fields:
 
 ```text
 symbol, range, interval, candles: {t, o, h, l, c, v}[],
-sma: {period, points[]}[], rsi: {period, points[]}[],
+sma: {period, points[]}[], rsi: {period, points[]},
 support[], resistance[], source, as_of, degraded, warnings[]
 ```
 
-When no commercially permitted source is configured for historical prices, the
-endpoint returns empty `candles`, `sma`, and `rsi` with `degraded: true` and an
-explicit warning. `source` must never claim CBOE for historical candles. The UI
-renders an unavailable state rather than a synthetic series.
+- XSP and VIX candles come from CBOE daily index history
+  (`source: "cboe_index_history"`). Other symbols come from Twelve Data Basic
+  (`source: "twelve_data"`). Candles are returned in ascending time order.
+- CBOE index history is end-of-day and has no volume. Those responses carry
+  `v: null` and a `volume_unavailable` warning; the UI hides the volume pane.
+- `sma` contains periods 20 and 50; `rsi` is a single series with period 14.
+- `support` and `resistance` are deterministic clustered pivot levels from the
+  candles, at most three each.
+- `source` is `"twelve_data"`, `"cboe_index_history"`, or `null` when no
+  candles are available.
+- `as_of` is the last candle timestamp.
+- If the provider is unconfigured, rate limited, or unavailable, the endpoint
+  returns empty candles and indicators with `degraded: true` and a warning.
+  A Twelve Data plan restriction returns `symbol_requires_paid_plan` with `200`
+  and empty candles. Never derive candles from the options chain, substitute a
+  different instrument, or synthesize a series.
 
 ## `GET /api/options/chain/{symbol}?expiration=YYYY-MM-DD`
 
@@ -63,7 +93,7 @@ Request:
 
 ```json
 {
-  "message": "sell 732 put and buy 729 put XSP 2026-11-20",
+  "message": "sell 732 put and buy 729 put XSP 2030-11-15",
   "default_symbol": "SPY"
 }
 ```
@@ -86,6 +116,30 @@ the truth table in [PLAYBOOK_SPEC.md](PLAYBOOK_SPEC.md). When expiration is the
 only missing leg field, return exactly `missing_fields: ["expiration"]`; do
 not start analysis.
 
+## `GET /api/analysis/example/{symbol}`
+
+Returns a ready-to-send example built from the live CBOE chain. The example is
+not a recommendation.
+
+Response fields:
+
+```text
+symbol, message, description, legs[], current_price, source, as_of
+```
+
+- Pick the listed put expiration closest to 40 days, preferring 21–60 days.
+- Pick the highest executable put strike at or below 99% of the underlying
+  price; fall back to the nearest executable strike below the price.
+- Pick the next lower executable put strike as the long leg.
+- `message` is a verbose sentence containing every parser field.
+  `description` explains the mechanics in plain language.
+- Both are regenerated per request, so the expiration and strikes follow the
+  live chain instead of a hardcoded sample.
+- Return `422` when the chain has no executable puts or no lower strike.
+
+The dashboard `Use example` button loads this response into the chat instead of
+using a hardcoded ticker, strike, or expiration.
+
 ## `POST /api/analysis/run`
 
 Runs a deterministic analysis for a complete position. Call `parse` first and do
@@ -103,14 +157,14 @@ Request:
         "side": "sell",
         "option_type": "put",
         "strike": 732,
-        "expiration": "2026-11-20"
+        "expiration": "2030-11-15"
       },
       {
         "symbol": "XSP",
         "side": "buy",
         "option_type": "put",
         "strike": 729,
-        "expiration": "2026-11-20"
+        "expiration": "2030-11-15"
       }
     ]
   },
@@ -158,8 +212,8 @@ Conventions:
   `underlying_price * atm_iv * sqrt(days_to_expiration / 365)`, where `atm_iv`
   is selected from the chain at the strike closest to the underlying price.
 - `header` is deterministic and ordered short leg / long leg:
-  `Bull Put Spread XSP 732/729 2026-11-20`. A single-leg header is
-  `Long Call SPY 600 2026-11-20`.
+  `Bull Put Spread XSP 732/729 2030-11-15`. A single-leg header is
+  `Long Call SPY 600 2030-11-15`.
 - `degraded` is true when any warning is present.
 - `recommendation` comes from one Gemini synthesis call and must use only the
   supplied facts. It must not define the strategy or give trade instructions.
@@ -171,7 +225,7 @@ Example response values for the request above, given executable quotes and a
 chain with a matching contract:
 
 ```text
-header: "Bull Put Spread XSP 732/729 2026-11-20"
+header: "Bull Put Spread XSP 732/729 2030-11-15"
 net_credit_debit: 150.0
 max_profit: 150.0
 max_loss: 150.0
@@ -194,7 +248,19 @@ disclaimer: "Educational analysis, not investment advice."
 - Assert `422` for a missing contract and for legs that do not form a supported
   spread, `429` for Gemini quota exhaustion, and `502` for a CBOE outage.
 - Assert `iv_rank` is `null` with an `iv_rank_unavailable` warning.
-- Mock CBOE 200 and verify normalized chain, `source`, and `as_of`.
+- Mock CBOE 200 and verify the normalized chain, `source`, and `as_of`.
+- Mock CBOE quote, `_VIX`, and Finnhub news; verify the combined market
+  response, per-section sources and timestamps, and the general-news fallback.
+- Verify market sections degrade independently: a CBOE outage keeps news, and
+  a missing news key keeps price and VIX.
+- Mock Twelve Data and verify candle normalization, SMA 20/50, RSI 14, support
+  and resistance, the 60-second cache, and the key staying out of the URL.
+- Mock CBOE index history and verify XSP candles load without a Twelve Data
+  key, with `source: "cboe_index_history"` and `volume_unavailable`.
+- Verify chart degradation for a missing key, a rate limit, a paid-plan
+  restriction, and an unknown symbol.
+- Verify the example endpoint picks a future expiration, a near-money strike,
+  and the next lower strike, and returns a verbose message.
 - Mock CBOE 503 and verify degraded output without fabricated values.
 - Mock CBOE 429 with a fresh cache and verify the cached chain is served.
 - Verify the frontend restores the selected ticker and theme from

@@ -1,277 +1,208 @@
-import {
-  afterNextRender,
-  Component,
-  computed,
-  effect,
-  ElementRef,
-  inject,
-  OnDestroy,
-  resource,
-  signal,
-  viewChild,
-} from '@angular/core';
-import { CurrencyPipe, DatePipe, DecimalPipe } from '@angular/common';
-import type { CandlestickData, IChartApi, ISeriesApi, Time } from 'lightweight-charts';
-import {
-  Candle,
-  CandlesResponse,
-  ChartRange,
-  InsightsResponse,
-  InsightValue,
-  SearchResponse,
-  SearchQuote,
-} from './models/market-data';
-import { MarketData } from './services/market-data';
+﻿import { DatePipe, DecimalPipe } from '@angular/common';
+import { httpResource } from '@angular/common/http';
+import { Component, afterNextRender, computed, inject, signal } from '@angular/core';
+import { errorMessage } from './api-error';
+import { AnalysisChat } from './components/analysis-chat/analysis-chat';
+import { PriceChart } from './components/price-chart/price-chart';
+import { ChartRange, ChartResponse, MarketResponse, NewsHeadline } from './models/market-data';
+import { formatPrice } from './price-format';
+import { Preferences } from './services/preferences';
+import { chartPalette } from './theme-palette';
 
 @Component({
-  imports: [CurrencyPipe, DatePipe, DecimalPipe],
   selector: 'app-root',
+  imports: [AnalysisChat, PriceChart, DatePipe, DecimalPipe],
   templateUrl: './app.html',
+  styleUrl: './app.css',
 })
-export class App implements OnDestroy {
-  private readonly marketData = inject(MarketData);
-  private readonly chartElement = viewChild<ElementRef<HTMLDivElement>>('chart');
-  private chart?: IChartApi;
-  private candleSeries?: ISeriesApi<'Candlestick'>;
-  private volumeSeries?: ISeriesApi<'Histogram'>;
-  private resizeObserver?: ResizeObserver;
+export class App {
+  protected readonly preferences = inject(Preferences);
 
-  protected readonly chartError = signal<string | null>(null);
-  protected readonly ticker = signal('AAPL');
-  protected readonly searchInput = signal('AAPL');
-  protected readonly searchQuery = signal('AAPL');
-  protected readonly range = signal<ChartRange>('6mo');
-  protected readonly showSearchResults = signal(false);
   protected readonly browserReady = signal(false);
+  protected readonly range = this.preferences.range;
+  protected readonly tickerInput = signal('SPY');
+  protected readonly tickerError = signal<string | null>(null);
   protected readonly ranges: readonly ChartRange[] = ['1mo', '3mo', '6mo', '1y', '5y'];
-  protected readonly popularTickers = ['NVDA', 'MSFT', 'TSLA'];
+  protected readonly popularSymbols = ['SPY', 'QQQ', 'AAPL', 'TSLA', 'XSP'];
 
-  protected readonly candles = resource<
-    CandlesResponse,
-    { ticker: string; range: ChartRange } | undefined
-  >({
-    params: () =>
-      this.browserReady() ? { ticker: this.ticker(), range: this.range() } : undefined,
-    loader: ({ params, abortSignal }) => {
-      if (!params) return Promise.reject(new Error('Choose a ticker to load market data.'));
-      return this.marketData.getCandles(params.ticker, params.range, abortSignal);
-    },
+  protected readonly theme = this.preferences.theme;
+  protected readonly symbol = this.preferences.symbol;
+  protected readonly levelColors = computed(() => chartPalette(this.theme()));
+
+  protected readonly chart = httpResource<ChartResponse>(() =>
+    this.browserReady()
+      ? `/api/chart/${encodeURIComponent(this.symbol())}?range=${this.range()}&interval=1d`
+      : undefined,
+  );
+
+  protected readonly market = httpResource<MarketResponse>(() =>
+    this.browserReady() ? `/api/market/${encodeURIComponent(this.symbol())}` : undefined,
+  );
+
+  protected readonly chartData = computed(() =>
+    this.chart.hasValue() ? this.chart.value() : undefined,
+  );
+  private readonly marketData = computed(() =>
+    this.market.hasValue() ? this.market.value() : undefined,
+  );
+
+  protected readonly support = computed(() => this.chartData()?.support ?? []);
+  protected readonly resistance = computed(() => this.chartData()?.resistance ?? []);
+  protected readonly news = computed((): NewsHeadline[] => this.marketData()?.news ?? []);
+  protected readonly vix = computed(() => this.marketData()?.vix ?? null);
+  protected readonly vixSeverity = computed<'calm' | 'elevated' | 'panic' | null>(() => {
+    const value = this.vix();
+    if (value === null) {
+      return null;
+    }
+    if (value < 20) {
+      return 'calm';
+    }
+    if (value < 30) {
+      return 'elevated';
+    }
+    return 'panic';
+  });
+  protected readonly hasCandles = computed(() => (this.chartData()?.candles.length ?? 0) > 0);
+
+  protected readonly price = computed<number | null>(() => {
+    const marketPrice = this.marketData()?.price;
+    if (marketPrice !== null && marketPrice !== undefined) {
+      return marketPrice;
+    }
+    const candles = this.chartData()?.candles ?? [];
+    return candles.at(-1)?.c ?? null;
   });
 
-  protected readonly insights = resource<InsightsResponse, string | undefined>({
-    params: () => (this.browserReady() ? this.ticker() : undefined),
-    loader: ({ params, abortSignal }) => {
-      if (!params) return Promise.reject(new Error('Choose a ticker to load market data.'));
-      return this.marketData.getInsights(params, abortSignal);
-    },
+  protected readonly changePct = computed<number | null>(() => {
+    const marketChange = this.marketData()?.change_pct;
+    if (marketChange !== null && marketChange !== undefined) {
+      return marketChange;
+    }
+    const candles = this.chartData()?.candles ?? [];
+    if (candles.length < 2) {
+      return null;
+    }
+    const previous = candles.at(-2)?.c;
+    const latest = candles.at(-1)?.c;
+    if (!previous || latest === undefined) {
+      return null;
+    }
+    return ((latest - previous) / previous) * 100;
   });
 
-  protected readonly searchResults = resource<SearchResponse, string | undefined>({
-    params: () => (this.browserReady() ? this.searchQuery() : undefined),
-    loader: ({ params, abortSignal }) => {
-      if (!params) return Promise.reject(new Error('Enter a symbol to search market data.'));
-      return this.marketData.search(params, abortSignal);
-    },
+  protected readonly asOf = computed(
+    () => this.marketData()?.as_of ?? this.chartData()?.as_of ?? null,
+  );
+
+  protected readonly sourceLabels = computed<string[]>(() => {
+    const labels: string[] = [];
+    const sources = this.marketData()?.sources;
+    if (sources?.quote) {
+      labels.push('CBOE delayed');
+    }
+    const chartSource = this.chartData()?.source;
+    if (chartSource === 'twelve_data') {
+      labels.push('Twelve Data');
+    } else if (chartSource === 'cboe_index_history') {
+      labels.push('CBOE daily history');
+    }
+    if (sources?.news) {
+      labels.push('Finnhub');
+    }
+    return labels;
   });
 
-  protected readonly latestCandle = computed(() => {
-    const data = this.candles.value();
-    return data?.candles.at(-1);
+  protected readonly warnings = computed<string[]>(() => {
+    const chartWarnings = this.chartData()?.warnings ?? [];
+    const marketWarnings = this.marketData()?.warnings ?? [];
+    return [...new Set([...marketWarnings, ...chartWarnings])];
   });
 
-  protected readonly priceChange = computed(() => {
-    const data = this.candles.value()?.candles ?? [];
-    if (data.length < 2) return null;
-    return data[data.length - 1].close - data[0].close;
-  });
+  protected readonly degraded = computed(
+    () => Boolean(this.chartData()?.degraded) || Boolean(this.marketData()?.degraded),
+  );
 
-  protected readonly priceChangePercent = computed(() => {
-    const data = this.candles.value()?.candles ?? [];
-    if (data.length < 2 || data[0].close === 0) return null;
-    return ((data[data.length - 1].close - data[0].close) / data[0].close) * 100;
-  });
-
-  protected readonly searchQuotes = computed(() => this.searchResults.value()?.quotes ?? []);
-  protected readonly news = computed(() => this.searchResults.value()?.news ?? []);
+  protected readonly errorMessage = errorMessage;
 
   constructor() {
     afterNextRender(() => {
       this.browserReady.set(true);
-      void this.initializeChart().catch((error: unknown) => {
-        this.chartError.set(this.errorMessage(error));
-      });
-    });
-
-    effect(() => {
-      const data = this.candles.value();
-      if (!data) return;
-      this.setChartData(data.candles);
-      this.setVolumeData(data.candles);
+      this.tickerInput.set(this.symbol());
     });
   }
 
-  protected submitSearch(event: SubmitEvent): void {
+  protected submitTicker(event: SubmitEvent): void {
     event.preventDefault();
-    const query = this.searchInput().trim();
-    if (!query) return;
-
-    const symbol = query.toUpperCase();
-    this.ticker.set(symbol);
-    this.searchQuery.set(query);
-    this.showSearchResults.set(true);
+    if (this.preferences.setSymbol(this.tickerInput())) {
+      this.tickerInput.set(this.symbol());
+      this.tickerError.set(null);
+      return;
+    }
+    this.tickerError.set('Use 1вЂ“15 characters: letters, digits, dot, dash, or underscore.');
   }
 
-  protected selectQuote(quote: SearchQuote): void {
-    if (!quote.symbol) return;
-    const symbol = quote.symbol.toUpperCase();
-    this.ticker.set(symbol);
-    this.searchInput.set(symbol);
-    this.searchQuery.set(symbol);
-    this.showSearchResults.set(false);
+  protected selectSymbol(symbol: string): void {
+    if (this.preferences.setSymbol(symbol)) {
+      this.tickerInput.set(this.symbol());
+      this.tickerError.set(null);
+    }
   }
 
-  protected selectTicker(symbol: string): void {
-    const normalizedSymbol = symbol.toUpperCase();
-    this.ticker.set(normalizedSymbol);
-    this.searchInput.set(normalizedSymbol);
-    this.searchQuery.set(normalizedSymbol);
-    this.showSearchResults.set(false);
-  }
-
-  protected updateSearchInput(event: Event): void {
-    this.searchInput.set((event.target as HTMLInputElement).value);
+  protected updateTickerInput(event: Event): void {
+    const target = event.target;
+    if (target instanceof HTMLInputElement) {
+      this.tickerInput.set(target.value);
+    }
   }
 
   protected selectRange(range: ChartRange): void {
-    this.range.set(range);
+    this.preferences.setRange(range);
   }
 
-  protected onRefresh(): void {
-    this.candles.reload();
-    this.insights.reload();
-    this.searchResults.reload();
+  protected toggleTheme(): void {
+    this.preferences.toggleTheme();
   }
 
-  protected formatInsight(value: InsightValue | undefined): string {
-    if (value === null || value === undefined) return '—';
-    if (typeof value !== 'object') return String(value);
-    if (Array.isArray(value)) return value.map((item) => this.formatInsight(item)).join(' · ');
-    return (
-      Object.entries(value)
-        .filter(([, item]) => item !== null)
-        .map(([key, item]) => `${this.humanize(key)} ${this.formatInsight(item)}`)
-        .join(' · ') || '—'
-    );
+  protected reload(): void {
+    this.chart.reload();
+    this.market.reload();
   }
 
-  protected humanize(value: string): string {
-    return value.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
-  }
-
-  protected errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : 'Please try again in a moment.';
-  }
-
-  protected trackQuote(_index: number, quote: SearchQuote): string {
-    return quote.symbol ?? String(_index);
-  }
-
-  protected trackNews(_index: number, item: { title: string | null }): string {
-    return item.title ?? String(_index);
-  }
-
-  ngOnDestroy(): void {
-    this.resizeObserver?.disconnect();
-    this.chart?.remove();
-  }
-
-  private async initializeChart(): Promise<void> {
-    const element = this.chartElement()?.nativeElement;
-    if (!element) return;
-    if (typeof ResizeObserver === 'undefined') {
-      this.chartError.set('Interactive charts require ResizeObserver support in this browser.');
-      return;
-    }
-
-    const { CandlestickSeries, ColorType, createChart, HistogramSeries } =
-      await import('lightweight-charts');
-
-    this.chart = createChart(element, {
-      autoSize: true,
-      layout: {
-        background: { type: ColorType.Solid, color: '#101310' },
-        textColor: '#8e9990',
-        fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
-        attributionLogo: true,
-      },
-      grid: {
-        vertLines: { color: '#1c211d' },
-        horzLines: { color: '#1c211d' },
-      },
-      rightPriceScale: { borderColor: '#292e29' },
-      timeScale: {
-        borderColor: '#292e29',
-        timeVisible: true,
-        secondsVisible: false,
-      },
-      crosshair: {
-        vertLine: { color: '#62746a', labelBackgroundColor: '#29332c' },
-        horzLine: { color: '#62746a', labelBackgroundColor: '#29332c' },
-      },
-    });
-
-    this.candleSeries = this.chart.addSeries(CandlestickSeries, {
-      upColor: '#b9f36a',
-      downColor: '#f07868',
-      borderUpColor: '#b9f36a',
-      borderDownColor: '#f07868',
-      wickUpColor: '#b9f36a',
-      wickDownColor: '#f07868',
-    });
-
-    this.volumeSeries = this.chart.addSeries(HistogramSeries, {
-      priceFormat: { type: 'volume' },
-      priceScaleId: '',
-      lastValueVisible: false,
-      priceLineVisible: false,
-    });
-    this.volumeSeries.priceScale().applyOptions({
-      scaleMargins: { top: 0.82, bottom: 0 },
-    });
-
-    this.resizeObserver = new ResizeObserver(() => this.chart?.timeScale().fitContent());
-    this.resizeObserver.observe(element);
-    const data = this.candles.value()?.candles;
-    if (data) {
-      this.setChartData(data);
-      this.setVolumeData(data);
+  protected warningLabel(code: string): string {
+    switch (code) {
+      case 'volume_unavailable':
+        return 'Volume is unavailable for this symbol.';
+      case 'symbol_requires_paid_plan':
+        return 'Candles for this symbol require a paid Twelve Data plan.';
+      case 'candles_provider_not_configured':
+        return 'The candle provider is not configured.';
+      case 'candles_rate_limited':
+        return 'The candle provider is rate limited.';
+      case 'candles_unavailable':
+        return 'Candles are temporarily unavailable.';
+      case 'quote_unavailable':
+        return 'The quote is unavailable.';
+      case 'price_unavailable':
+        return 'The price is unavailable.';
+      case 'change_pct_unavailable':
+        return 'The price change is unavailable.';
+      case 'vix_unavailable':
+        return 'VIX is unavailable.';
+      case 'news_provider_not_configured':
+        return 'The news provider is not configured.';
+      case 'news_rate_limited':
+        return 'The news provider is rate limited.';
+      case 'news_unavailable':
+        return 'News is temporarily unavailable.';
+      case 'iv_rank_unavailable':
+        return 'IV rank is unavailable.';
+      default:
+        return code;
     }
   }
 
-  private setChartData(candles: Candle[]): void {
-    if (!this.candleSeries) return;
-    const points: CandlestickData<Time>[] = candles.map((item) => ({
-      time: this.chartTime(item),
-      open: item.open,
-      high: item.high,
-      low: item.low,
-      close: item.close,
-    }));
-    this.candleSeries.setData(points);
-    this.chart?.timeScale().fitContent();
-  }
-
-  private setVolumeData(candles: Candle[]): void {
-    this.volumeSeries?.setData(
-      candles.map((item) => ({
-        time: this.chartTime(item),
-        value: item.volume,
-        color: item.close >= item.open ? '#b9f36a45' : '#f0786845',
-      })),
-    );
-  }
-
-  private chartTime(candle: Candle): Time {
-    return new Date(candle.timestamp * 1000).toISOString().slice(0, 10) as Time;
+  protected formatLevel(value: number): string {
+    return formatPrice(value);
   }
 }

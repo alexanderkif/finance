@@ -9,63 +9,78 @@
   service, as configured in `vercel.json`.
 - Python version and dependencies are defined by `api/pyproject.toml` and
   `api/uv.lock`; the current project requirement is Python `>=3.14`.
-- The current Vercel configuration points to `api/index:app`. The application
-  may be fully rewritten; retain or replace this entry point as appropriate,
-  and verify the resulting Vercel routes.
+- The Vercel configuration points to `api/index:app`.
 - Use `vercel dev` to verify the integrated application; `ng serve` alone
   does not exercise Vercel rewrites.
 
-## Target API layout
+## API layout
 
 ```text
 api/
 ├── index.py                 # Vercel entry point; exports the FastAPI app
 ├── routers/
-│   ├── market.py
+│   ├── market.py            # quote, VIX, news
+│   ├── chart.py             # candles, indicators, key levels
 │   ├── options.py
 │   └── analysis.py
 ├── core/
 │   ├── cboe_provider.py
-│   ├── metrics.py            # deterministic calculations only
-│   └── playbooks/            # JSON playbook definitions
+│   ├── cboe_history_provider.py  # XSP/VIX daily OHLC history
+│   ├── twelvedata_provider.py
+│   ├── finnhub_provider.py
+│   ├── indicators.py        # deterministic SMA/RSI and pivot levels
+│   ├── metrics.py           # deterministic calculations only
+│   └── playbooks/           # JSON playbook definitions
 └── agent/
     ├── graph.py
     └── prompts.py
 ```
 
 Keep HTTP routing, provider access, deterministic metrics, and LLM orchestration
-in their respective modules. Use `gemini-3.1-flash-lite` for both model calls
-per analysis: extraction and synthesis. Prefer a direct Gemini structured-output
-call; adopt LangChain/LangGraph only if the analysis flow grows beyond one
-deterministic pipeline, and record that decision. The current implementation
-calls Gemini directly over HTTP and runs the pipeline in `api/agent/graph.py`.
+in their respective modules. Providers are isolated behind adapters so the
+free-tier sources can be replaced without changing response contracts.
 
-Read `GEMINI_API_KEY` only in the server process. Load it from the
-repository-root `.env.local` for local development and from deployment
-environment settings in production. Never expose the key in browser code or
-logs.
+Use `gemini-3.1-flash-lite` for both model calls per analysis: extraction and
+synthesis. Prefer a direct Gemini structured-output call; adopt
+LangChain/LangGraph only if the analysis flow grows beyond one deterministic
+pipeline, and record that decision. The current implementation calls Gemini
+directly over HTTP and runs the pipeline in `api/agent/graph.py`.
+
+## Provider configuration
+
+- `GEMINI_API_KEY` enables extraction and synthesis.
+- `TWELVE_DATA_API_KEY` enables daily candles for non-index symbols.
+- CBOE index history provides XSP and VIX daily OHLC without a key.
+- `FINNHUB_API_KEY` enables news headlines.
+- CBOE delayed endpoints require no key.
+- Read keys only in the server process. Load them from the repository-root
+  `.env.local` for local development and from deployment environment settings
+  in production. Never expose or log a key.
+- The current free tiers are non-commercial. A commercial launch requires
+  licensed CBOE, Twelve Data, and Finnhub plans or replacement providers.
 
 ## Angular frontend
 
-The existing dashboard may be fully rewritten; do not preserve its layout,
-components, or data services. Follow [src/AGENTS.md](src/AGENTS.md).
+The legacy dashboard has been replaced. Follow [src/AGENTS.md](src/AGENTS.md).
 
 - Use Angular CLI, standalone APIs, signals, and typed forms.
 - Screen order: market card grid, candlestick chart, AI chat, then secondary
   content.
-- Include an instrument selector that defaults to SPY and persists the selected
-  symbol in `localStorage`.
+- The instrument selector defaults to SPY and persists the selected symbol in
+  `localStorage`.
 - Provide light and dark themes with CSS custom properties and `color-scheme`,
   persist the choice, and default to `prefers-color-scheme`. Apply the stored
   theme before hydration to avoid a flash of the wrong theme.
 - Use `ng-apexcharts` for candlesticks, API-provided SMA/RSI overlays, and
   annotations. ApexCharts annotations do not support arbitrary diagonal lines,
-  so user-drawn trend lines are a separate overlay synchronized to the chart;
-  do not approximate them with horizontal annotations.
-- ApexStock is not adopted initially. Record that decision and revisit it only
-  if `ng-apexcharts` cannot meet the chart requirements.
+  so user-drawn trend lines are added as extra line series synchronized to the
+  chart's datetime axis; do not approximate them with horizontal annotations.
+- ApexStock is not adopted. Revisit it only if `ng-apexcharts` cannot meet the
+  chart requirements.
 - Chart, levels, and news data must come from the API. Render explicit
   unavailable states instead of synthetic series or placeholder values.
+- The chat collects the intent (open, close, roll) separately because parsing
+  currently returns position legs and language only.
 
 ## Agent boundary
 
@@ -76,14 +91,15 @@ financial arithmetic remain deterministic in `api/core/metrics.py`. LLM calls
 are limited to extraction and synthesis: one extraction call in
 `POST /api/analysis/parse` and at most one synthesis call in
 `POST /api/analysis/run`. The synthesis prompt receives computed facts and must
-not perform arithmetic.
+not perform arithmetic. Deterministic limits and a scope check run before
+extraction: off-topic, oversized, abusive, or prompt-injection input is refused
+without a Gemini call and without an analysis card.
 
-## Rewrite freedom and current implementation
+## Current implementation
 
-The existing service still exposes Yahoo Finance-backed endpoints
-(`/api/candles`, `/api/insights`, `/api/search`) and the FastAPI app is still
-titled "Yahoo Finance API". The target product contract requires CBOE for
-options and prohibits Yahoo Finance in production, so these endpoints and the
-title must be removed as part of the frontend rewrite (Phase 4). Treat target
-functionality as planned until implemented and verified; do not preserve legacy
-behavior solely for compatibility.
+The Yahoo Finance endpoints and the "Yahoo Finance API" title have been removed.
+The API is now `Options Strategy Assistant API` and exposes market, chart,
+options, parse, and analysis routes. Phase 4 frontend verification is pending a
+browser pass with real Twelve Data and Finnhub keys; the integrated
+`vercel dev` routes, CBOE quote/VIX, and the Twelve Data chart endpoint have
+been verified with the Twelve Data demo key.

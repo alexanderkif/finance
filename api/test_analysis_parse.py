@@ -6,7 +6,6 @@ from typing import Literal
 from unittest.mock import patch
 
 import httpx
-
 from core.playbook_registry import PlaybookKey
 from index import app
 from routers.analysis import ParsedLeg, classify_strategy, classify_vertical
@@ -50,11 +49,7 @@ class AnalysisParseApiTests(unittest.IsolatedAsyncioTestCase):
         response_text = json.dumps(self.model_result)
         return httpx.Response(
             200,
-            json={
-                "candidates": [
-                    {"content": {"parts": [{"text": response_text}]}}
-                ]
-            },
+            json={"candidates": [{"content": {"parts": [{"text": response_text}]}}]},
         )
 
     def assert_gemini_request_is_structured(self) -> None:
@@ -77,14 +72,14 @@ class AnalysisParseApiTests(unittest.IsolatedAsyncioTestCase):
                     "side": "sell",
                     "option_type": "put",
                     "strike": 732,
-                    "expiration": "2026-11-20",
+                    "expiration": "2030-11-15",
                 },
                 {
                     "symbol": "XSP",
                     "side": "buy",
                     "option_type": "put",
                     "strike": 729,
-                    "expiration": "2026-11-20",
+                    "expiration": "2030-11-15",
                 },
             ]
         )
@@ -92,7 +87,7 @@ class AnalysisParseApiTests(unittest.IsolatedAsyncioTestCase):
         response = await self.api_client.post(
             "/api/analysis/parse",
             json={
-                "message": "sell 732 put and buy 729 put XSP 2026-11-20",
+                "message": "sell 732 put and buy 729 put XSP 2030-11-15",
             },
         )
 
@@ -101,7 +96,7 @@ class AnalysisParseApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["position_type"], "strategy")
         self.assertEqual(body["strategy_key"], "bull_put_spread")
         self.assertEqual(body["missing_fields"], [])
-        self.assertEqual(body["legs"][0]["expiration"], "2026-11-20")
+        self.assertEqual(body["legs"][0]["expiration"], "2030-11-15")
         self.assert_gemini_request_is_structured()
 
     async def test_parses_bear_call_spread_with_dotted_expiration(self) -> None:
@@ -112,27 +107,27 @@ class AnalysisParseApiTests(unittest.IsolatedAsyncioTestCase):
                     "side": "sell",
                     "option_type": "call",
                     "strike": 732,
-                    "expiration": "20.11.2026",
+                    "expiration": "15.11.2030",
                 },
                 {
                     "symbol": "XSP",
                     "side": "buy",
                     "option_type": "call",
                     "strike": 735,
-                    "expiration": "20.11.2026",
+                    "expiration": "15.11.2030",
                 },
             ]
         )
 
         response = await self.api_client.post(
             "/api/analysis/parse",
-            json={"message": "sell 732 call and buy 735 call XSP 20.11.2026"},
+            json={"message": "sell 732 call and buy 735 call XSP 15.11.2030"},
         )
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
         self.assertEqual(body["strategy_key"], "bear_call_spread")
-        self.assertEqual(body["legs"][1]["expiration"], "2026-11-20")
+        self.assertEqual(body["legs"][1]["expiration"], "2030-11-15")
         self.assertEqual(body["missing_fields"], [])
 
     async def test_single_leg_without_expiration_has_only_that_missing_field(
@@ -168,7 +163,7 @@ class AnalysisParseApiTests(unittest.IsolatedAsyncioTestCase):
                     "side": "buy",
                     "option_type": "call",
                     "strike": 600,
-                    "expiration": "2026-11-20",
+                    "expiration": "2030-11-15",
                 }
             ]
         )
@@ -176,7 +171,7 @@ class AnalysisParseApiTests(unittest.IsolatedAsyncioTestCase):
         response = await self.api_client.post(
             "/api/analysis/parse",
             json={
-                "message": "buy 600 call 2026-11-20",
+                "message": "buy 600 call 2030-11-15",
                 "default_symbol": " xsp ",
             },
         )
@@ -215,7 +210,7 @@ class AnalysisParseApiTests(unittest.IsolatedAsyncioTestCase):
                     "side": "buy",
                     "option_type": "call",
                     "strike": strike,
-                    "expiration": "2026-11-20",
+                    "expiration": "2030-11-15",
                 }
                 for strike in (600, 610, 620)
             ]

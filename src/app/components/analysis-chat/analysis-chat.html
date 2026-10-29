@@ -1,0 +1,176 @@
+<section class="chat-card" aria-labelledby="chat-title">
+  <header class="chat-header">
+    <div>
+      <h2 id="chat-title">Strategy analysis chat</h2>
+      <p class="chat-meta">
+        Instrument: {{ symbol() }} · answers in your language · educational only
+      </p>
+    </div>
+    <button
+      type="button"
+      class="button button-quiet"
+      (click)="useExample()"
+      [disabled]="exampleBusy()"
+    >
+      {{ exampleBusy() ? 'Loading example…' : 'Use example' }}
+    </button>
+  </header>
+
+  <div class="chat-log" role="log" aria-live="polite" aria-label="Conversation">
+    @for (message of messages(); track $index) {
+      <article class="message" [class.message-user]="message.role === 'user'">
+        <span class="message-role">
+          {{ message.role === 'user' ? 'You' : 'Assistant' }}
+        </span>
+        <p>{{ message.text }}</p>
+      </article>
+    }
+    @if (busy()) {
+      <p class="thinking" role="status">Working…</p>
+    }
+  </div>
+
+  @if (error(); as message) {
+    <p class="error" role="alert">{{ message }}</p>
+  }
+
+  @if (analysis(); as result) {
+    <article class="analysis-card" aria-label="Analysis result">
+      <h3>{{ result.header }}</h3>
+      <p class="analysis-summary">{{ result.recommendation }}</p>
+
+      <dl class="metric-grid">
+        <div>
+          <dt>Probability of profit</dt>
+          <dd>
+            @if (result.probability_positive !== null) {
+              {{ result.probability_positive | percent: '1.0-1' }}
+            } @else {
+              —
+            }
+          </dd>
+        </div>
+        <div>
+          <dt>
+            {{ result.net_credit_debit >= 0 ? 'Net credit' : 'Net debit' }}
+          </dt>
+          <dd>
+            {{
+              (result.net_credit_debit >= 0 ? result.net_credit_debit : -result.net_credit_debit)
+                | currency: 'USD' : 'symbol' : '1.0-0'
+            }}
+          </dd>
+        </div>
+        <div>
+          <dt>Max profit</dt>
+          <dd>
+            @if (result.max_profit !== null) {
+              {{ result.max_profit | currency: 'USD' : 'symbol' : '1.0-0' }}
+            } @else {
+              Unbounded
+            }
+          </dd>
+        </div>
+        <div>
+          <dt>Max loss</dt>
+          <dd>
+            @if (result.max_loss !== null) {
+              {{ result.max_loss | currency: 'USD' : 'symbol' : '1.0-0' }}
+            } @else {
+              Unbounded
+            }
+          </dd>
+        </div>
+        <div>
+          <dt>Breakeven</dt>
+          <dd>
+            @if (result.breakeven !== null) {
+              {{ result.breakeven | number: '1.2-2' }}
+            } @else {
+              —
+            }
+          </dd>
+        </div>
+        <div>
+          <dt>Theta / day</dt>
+          <dd>
+            @if (result.theta_daily !== null) {
+              {{ result.theta_daily | currency: 'USD' : 'symbol' : '1.2-2' }}
+            } @else {
+              —
+            }
+          </dd>
+        </div>
+        <div>
+          <dt>IV rank</dt>
+          <dd>
+            @if (result.iv_rank !== null) {
+              {{ result.iv_rank | percent: '1.0-0' }}
+            } @else {
+              —
+            }
+          </dd>
+        </div>
+        <div>
+          <dt>Liquidity</dt>
+          <dd>
+            {{ result.liquidity.rating }}
+            @if (result.liquidity.bid_ask_spread_pct !== null) {
+              ({{ result.liquidity.bid_ask_spread_pct | number: '1.0-1' }}%)
+            }
+          </dd>
+        </div>
+      </dl>
+
+      @if (result.scenario_1sigma; as scenario) {
+        <p class="scenario">
+          1σ over {{ scenario.days_to_expiration }} days: {{ scenario.low | number: '1.2-2' }} –
+          {{ scenario.high | number: '1.2-2' }}
+          (ATM IV {{ scenario.atm_iv | percent: '1.0-1' }})
+        </p>
+      }
+
+      <ul class="chips" aria-label="Event sensitivity">
+        @for (flag of result.event_flags; track $index) {
+          <li>{{ flag }}</li>
+        }
+      </ul>
+
+      @if (result.warnings.length > 0) {
+        <ul class="warnings" aria-label="Data warnings">
+          @for (warning of result.warnings; track $index) {
+            <li>{{ warning }}</li>
+          }
+        </ul>
+      }
+
+      <p class="disclaimer">{{ result.disclaimer }}</p>
+    </article>
+  }
+
+  <form class="chat-form" (submit)="send($event)">
+    <label class="field">
+      <span>Intent</span>
+      <select [value]="intent()" (change)="setIntent($event)">
+        <option value="open">Open</option>
+        <option value="close">Close</option>
+        <option value="roll">Roll</option>
+      </select>
+    </label>
+    <label class="field chat-input">
+      <span>Your position</span>
+      <textarea
+        rows="2"
+        [value]="draft()"
+        (input)="updateDraft($event)"
+        [disabled]="busy()"
+        placeholder="Example: sell 732 put and buy 729 put XSP 2026-11-20"
+      ></textarea>
+    </label>
+    <div class="chat-actions">
+      <button type="submit" class="button button-primary" [disabled]="!canSend()">
+        {{ busy() ? 'Working…' : 'Analyze' }}
+      </button>
+    </div>
+  </form>
+</section>

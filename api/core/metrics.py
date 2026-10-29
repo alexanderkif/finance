@@ -1,11 +1,10 @@
+import re
 from datetime import date
 from math import sqrt
-import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-
 from core.playbook_registry import Playbook
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Side = Literal["buy", "sell"]
 OptionType = Literal["call", "put"]
@@ -187,9 +186,7 @@ def _bounded_outcomes(
                 else _money((leg.strike - premium) * 100)
             )
         breakeven = (
-            leg.strike + premium
-            if leg.option_type == "call"
-            else leg.strike - premium
+            leg.strike + premium if leg.option_type == "call" else leg.strike - premium
         )
         return max_profit, max_loss, _money(breakeven)
 
@@ -255,9 +252,7 @@ def _liquidity(legs: list[LegQuote]) -> Liquidity:
         for leg, mid in zip(legs, mids)
         if mid is not None and leg.ask is not None and leg.bid is not None
     ]
-    spread_pct = (
-        round(max(spreads), 2) if len(spreads) == len(legs) else None
-    )
+    spread_pct = round(max(spreads), 2) if len(spreads) == len(legs) else None
     open_interest = (
         min(leg.open_interest for leg in legs if leg.open_interest is not None)
         if all(leg.open_interest is not None for leg in legs)

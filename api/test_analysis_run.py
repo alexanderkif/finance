@@ -4,7 +4,6 @@ import unittest
 from unittest.mock import patch
 
 import httpx
-
 from index import app
 
 RECOMMENDATION = (
@@ -40,7 +39,7 @@ def contract(
 
 def cboe_payload() -> dict[str, object]:
     return {
-        "timestamp": "2026-10-29 10:05:32",
+        "timestamp": "2030-10-24 10:05:32",
         "symbol": "SPY",
         "data": {
             "symbol": "SPY",
@@ -48,7 +47,7 @@ def cboe_payload() -> dict[str, object]:
             "price_change_percent": 0.42,
             "options": [
                 contract(
-                    "SPY261120P00732000",
+                    "SPY301115P00732000",
                     bid=3.00,
                     ask=3.20,
                     delta=-0.30,
@@ -57,7 +56,7 @@ def cboe_payload() -> dict[str, object]:
                     volume=500,
                 ),
                 contract(
-                    "SPY261120P00729000",
+                    "SPY301115P00729000",
                     bid=1.50,
                     ask=1.70,
                     delta=-0.18,
@@ -66,21 +65,21 @@ def cboe_payload() -> dict[str, object]:
                     volume=400,
                 ),
                 contract(
-                    "SPY261120C00732000",
+                    "SPY301115C00732000",
                     bid=2.40,
                     ask=2.60,
                     delta=0.42,
                     theta=-0.06,
                 ),
                 contract(
-                    "SPY261120C00729000",
+                    "SPY301115C00729000",
                     bid=3.90,
                     ask=4.10,
                     delta=0.55,
                     theta=-0.08,
                 ),
                 contract(
-                    "SPY261120C00600000",
+                    "SPY301115C00600000",
                     bid=4.90,
                     ask=5.10,
                     delta=0.40,
@@ -101,14 +100,14 @@ def spread_body() -> dict[str, object]:
                     "side": "sell",
                     "option_type": "put",
                     "strike": 732,
-                    "expiration": "2026-11-20",
+                    "expiration": "2030-11-15",
                 },
                 {
                     "symbol": "SPY",
                     "side": "buy",
                     "option_type": "put",
                     "strike": 729,
-                    "expiration": "2026-11-20",
+                    "expiration": "2030-11-15",
                 },
             ],
         },
@@ -127,7 +126,7 @@ def single_body() -> dict[str, object]:
                     "side": "buy",
                     "option_type": "call",
                     "strike": 600,
-                    "expiration": "2026-11-20",
+                    "expiration": "2030-11-15",
                 }
             ],
         },
@@ -170,18 +169,14 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         if request.url.host == "generativelanguage.googleapis.com":
             self.gemini_requests.append(request)
             if self.gemini_status != 200:
-                return httpx.Response(
-                    self.gemini_status, json={"error": "redacted"}
-                )
+                return httpx.Response(self.gemini_status, json={"error": "redacted"})
             return httpx.Response(
                 200,
                 json={
                     "candidates": [
                         {
                             "content": {
-                                "parts": [
-                                    {"text": json.dumps(self.model_result)}
-                                ]
+                                "parts": [{"text": json.dumps(self.model_result)}]
                             }
                         }
                     ]
@@ -196,15 +191,11 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("/api/analysis/run", response.json()["paths"])
 
     async def test_run_returns_deterministic_bull_put_metrics(self) -> None:
-        response = await self.api_client.post(
-            "/api/analysis/run", json=spread_body()
-        )
+        response = await self.api_client.post("/api/analysis/run", json=spread_body())
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(
-            body["header"], "Bull Put Spread SPY 732/729 2026-11-20"
-        )
+        self.assertEqual(body["header"], "Bull Put Spread SPY 732/729 2030-11-15")
         self.assertEqual(body["strategy_key"], "bull_put_spread")
         self.assertEqual(body["net_credit_debit"], 150.0)
         self.assertEqual(body["max_profit"], 150.0)
@@ -213,9 +204,7 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["probability_positive"], 0.7)
         self.assertEqual(body["theta_daily"], 5.0)
         self.assertIsNone(body["iv_rank"])
-        self.assertEqual(
-            body["event_flags"], ["earnings", "dividends", "macro"]
-        )
+        self.assertEqual(body["event_flags"], ["earnings", "dividends", "macro"])
         self.assertEqual(body["liquidity"]["bid_ask_spread_pct"], 12.5)
         self.assertEqual(body["liquidity"]["open_interest"], 800)
         self.assertEqual(body["liquidity"]["rating"], "fair")
@@ -226,7 +215,7 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(body["detected_language"], "English")
         self.assertEqual(body["source"], "cboe_delayed")
-        self.assertTrue(body["as_of"].startswith("2026-10-29T10:05:32"))
+        self.assertTrue(body["as_of"].startswith("2030-10-24T10:05:32"))
         self.assertTrue(body["degraded"])
         self.assertIn("iv_rank_unavailable", body["warnings"])
         self.assertEqual(body["recommendation"], RECOMMENDATION)
@@ -245,7 +234,7 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
             payload["systemInstruction"]["parts"][0]["text"],
         )
         facts = json.loads(payload["contents"][0]["parts"][0]["text"])
-        self.assertEqual(facts["header"], "Bull Put Spread SPY 732/729 2026-11-20")
+        self.assertEqual(facts["header"], "Bull Put Spread SPY 732/729 2030-11-15")
         self.assertEqual(facts["intent"], "open")
         self.assertEqual(facts["language"], "English")
         self.assertEqual(facts["metrics"]["breakeven"], 730.5)
@@ -253,13 +242,11 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(facts["metrics"]["iv_rank"])
 
     async def test_run_returns_an_unbounded_long_call(self) -> None:
-        response = await self.api_client.post(
-            "/api/analysis/run", json=single_body()
-        )
+        response = await self.api_client.post("/api/analysis/run", json=single_body())
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
-        self.assertEqual(body["header"], "Long Call SPY 600 2026-11-20")
+        self.assertEqual(body["header"], "Long Call SPY 600 2030-11-15")
         self.assertIsNone(body["max_profit"])
         self.assertEqual(body["max_loss"], 500.0)
         self.assertEqual(body["breakeven"], 605.0)
@@ -298,9 +285,7 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_reports_gemini_quota_exhaustion(self) -> None:
         self.gemini_status = 429
 
-        response = await self.api_client.post(
-            "/api/analysis/run", json=spread_body()
-        )
+        response = await self.api_client.post("/api/analysis/run", json=spread_body())
 
         self.assertEqual(response.status_code, 429)
         self.assertIn("quota", response.json()["detail"])
@@ -323,9 +308,7 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
     ) -> None:
         self.cboe_status = 503
 
-        response = await self.api_client.post(
-            "/api/analysis/run", json=spread_body()
-        )
+        response = await self.api_client.post("/api/analysis/run", json=spread_body())
 
         self.assertEqual(response.status_code, 502)
         self.assertEqual(self.gemini_requests, [])
@@ -334,9 +317,7 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_run_rejects_an_invalid_recommendation_shape(self) -> None:
         self.model_result = {"recommendation": "Too short"}
 
-        response = await self.api_client.post(
-            "/api/analysis/run", json=spread_body()
-        )
+        response = await self.api_client.post("/api/analysis/run", json=spread_body())
 
         self.assertEqual(response.status_code, 502)
 

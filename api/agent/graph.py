@@ -1,11 +1,8 @@
-from datetime import datetime
 import json
+from datetime import datetime
 from typing import Literal
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
-
-from agent.prompts import SYNTHESIS_RESPONSE_SCHEMA, SYNTHESIS_SYSTEM_INSTRUCTION
 from core.cboe_provider import (
     CboeOptionQuote,
     CboeOptionsProvider,
@@ -25,6 +22,9 @@ from core.metrics import (
     format_header,
 )
 from core.playbook_registry import Playbook, PlaybookKey
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from agent.prompts import SYNTHESIS_RESPONSE_SCHEMA, SYNTHESIS_SYSTEM_INSTRUCTION
 
 
 class SynthesisOutput(BaseModel):

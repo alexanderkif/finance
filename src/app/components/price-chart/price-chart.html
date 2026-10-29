@@ -1,0 +1,242 @@
+<section class="chart-card" aria-labelledby="price-chart-title">
+  <header class="chart-header">
+    <div>
+      <h2 id="price-chart-title">{{ data().symbol }} candlesticks</h2>
+      <p class="chart-meta">
+        {{ data().range }} · {{ data().candles.length }} sessions ·
+        {{ sourceLabel() }}
+      </p>
+    </div>
+    <div class="chart-actions" role="group" aria-label="Chart controls">
+      <label class="toggle">
+        <input type="checkbox" [checked]="showSma20()" (change)="toggleSma20()" />
+        SMA 20
+      </label>
+      <label class="toggle">
+        <input type="checkbox" [checked]="showSma50()" (change)="toggleSma50()" />
+        SMA 50
+      </label>
+      <label class="toggle">
+        <input type="checkbox" [checked]="showRsi()" (change)="toggleRsi()" />
+        RSI
+      </label>
+      <label class="toggle">
+        <input type="checkbox" [checked]="showLevels()" (change)="toggleLevels()" />
+        Support/Resistance
+      </label>
+      <button
+        type="button"
+        class="button button-quiet"
+        [class.is-active]="drawing()"
+        [attr.aria-pressed]="drawing()"
+        (click)="startDrawing()"
+      >
+        Trend line
+      </button>
+      <button
+        type="button"
+        class="button button-quiet"
+        [disabled]="trendLines().length === 0"
+        (click)="clearLines()"
+      >
+        Clear
+      </button>
+    </div>
+  </header>
+
+  @if (drawing()) {
+    <p class="chart-hint" id="chart-keyboard-hint" role="status">
+      Click two points on the chart, or focus the chart and use the Left and Right arrow keys plus
+      Enter. Escape cancels. {{ pending() ? 'First point set.' : '' }}
+    </p>
+  }
+
+  <p class="visually-hidden" role="status" aria-live="polite">{{ keyboardStatus() }}</p>
+
+  <div class="chart-stack">
+    <div
+      class="chart-canvas"
+      role="group"
+      tabindex="0"
+      aria-label="Candlestick chart with trend lines and indicators"
+      [attr.aria-describedby]="drawing() ? 'chart-keyboard-hint' : null"
+      (click)="onPlotClick($event)"
+      (focus)="onChartFocus()"
+      (keydown)="onChartKeydown($event)"
+      (mousemove)="onHover($event, 'price')"
+      (mouseleave)="clearHover()"
+    >
+      <apx-chart
+        #priceChart
+        [chart]="options().chart"
+        [annotations]="options().annotations"
+        [colors]="options().colors"
+        [dataLabels]="options().dataLabels"
+        [grid]="options().grid"
+        [legend]="options().legend"
+        [noData]="options().noData"
+        [plotOptions]="options().plotOptions"
+        [theme]="options().theme"
+        [stroke]="options().stroke"
+        [tooltip]="options().tooltip"
+        [xaxis]="options().xaxis"
+        [yaxis]="options().yaxis"
+        [series]="series()"
+        (chartReady)="onChartReady($event.chartObj)"
+      />
+
+      <div class="latest-values" aria-label="Candle values">
+        @if (activeValues(); as values) {
+          <p class="latest-date">{{ values.date | date: 'mediumDate' }}</p>
+          <dl>
+            <div class="latest-item">
+              <dt>Open</dt>
+              <dd [class.is-up]="values.rising" [class.is-down]="!values.rising">
+                {{ values.open }}
+              </dd>
+            </div>
+            <div class="latest-item">
+              <dt>High</dt>
+              <dd [class.is-up]="values.rising" [class.is-down]="!values.rising">
+                {{ values.high }}
+              </dd>
+            </div>
+            <div class="latest-item">
+              <dt>Low</dt>
+              <dd [class.is-up]="values.rising" [class.is-down]="!values.rising">
+                {{ values.low }}
+              </dd>
+            </div>
+            <div class="latest-item">
+              <dt>Close</dt>
+              <dd [class.is-up]="values.rising" [class.is-down]="!values.rising">
+                {{ values.close }}
+              </dd>
+            </div>
+            <div class="latest-item">
+              <dt>Vol</dt>
+              <dd [class.is-up]="values.rising" [class.is-down]="!values.rising">
+                {{ values.volume }}
+              </dd>
+            </div>
+            @for (sma of activeSma(); track sma.period) {
+              <div class="latest-item">
+                <dt>SMA {{ sma.period }}</dt>
+                <dd [style.color]="sma.color">{{ sma.value }}</dd>
+              </div>
+            }
+          </dl>
+        }
+      </div>
+
+      @if (hoverPrice(); as price) {
+        <span
+          class="price-crosshair"
+          aria-hidden="true"
+          [style.top.px]="price.y"
+          [style.left.px]="price.left"
+          [style.width.px]="price.width"
+        ></span>
+        <span
+          class="price-crosshair-label"
+          aria-hidden="true"
+          [style.top.px]="price.y"
+          [style.left.px]="price.left + 4"
+        >
+          {{ price.value }}
+        </span>
+      }
+    </div>
+
+    @if (hasVolume()) {
+      <div
+        class="volume-canvas"
+        role="img"
+        aria-label="Trading volume for the visible candles"
+        (mousemove)="onHover($event, 'volume')"
+        (mouseleave)="clearHover()"
+      >
+        <apx-chart
+          [chart]="volumeOptions().chart"
+          [colors]="volumeOptions().colors"
+          [dataLabels]="volumeOptions().dataLabels"
+          [fill]="volumeOptions().fill"
+          [grid]="volumeOptions().grid"
+          [legend]="volumeOptions().legend"
+          [noData]="volumeOptions().noData"
+          [plotOptions]="volumeOptions().plotOptions"
+          [theme]="volumeOptions().theme"
+          [stroke]="volumeOptions().stroke"
+          [tooltip]="volumeOptions().tooltip"
+          [xaxis]="volumeOptions().xaxis"
+          [yaxis]="volumeOptions().yaxis"
+          [series]="volumeSeries()"
+          (chartReady)="onVolumeReady($event.chartObj)"
+        />
+      </div>
+    }
+
+    @if (showRsi() && hasRsi()) {
+      <div
+        class="rsi-canvas"
+        role="img"
+        aria-label="RSI 14 indicator"
+        (mousemove)="onHover($event, 'rsi')"
+        (mouseleave)="clearHover()"
+      >
+        <apx-chart
+          [chart]="rsiOptions().chart"
+          [annotations]="rsiOptions().annotations"
+          [colors]="rsiOptions().colors"
+          [dataLabels]="rsiOptions().dataLabels"
+          [grid]="rsiOptions().grid"
+          [legend]="rsiOptions().legend"
+          [theme]="rsiOptions().theme"
+          [stroke]="rsiOptions().stroke"
+          [tooltip]="rsiOptions().tooltip"
+          [xaxis]="rsiOptions().xaxis"
+          [yaxis]="rsiOptions().yaxis"
+          [series]="rsiSeries()"
+          (chartReady)="onRsiReady($event.chartObj)"
+        />
+      </div>
+    }
+
+    <span
+      class="hover-line"
+      aria-hidden="true"
+      [class.is-visible]="hoverLeft() !== null"
+      [style.left.px]="hoverLeft() ?? 0"
+    ></span>
+  </div>
+
+  <details class="chart-table">
+    <summary>Chart data table (last 12 sessions)</summary>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Date</th>
+            <th scope="col">Open</th>
+            <th scope="col">High</th>
+            <th scope="col">Low</th>
+            <th scope="col">Close</th>
+            <th scope="col">Volume</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (candle of visibleCandles(); track candle.t) {
+            <tr>
+              <th scope="row">{{ candle.t | date: 'mediumDate' }}</th>
+              <td>{{ candle.o | number: '1.2-2' }}</td>
+              <td>{{ candle.h | number: '1.2-2' }}</td>
+              <td>{{ candle.l | number: '1.2-2' }}</td>
+              <td>{{ candle.c | number: '1.2-2' }}</td>
+              <td>{{ candle.v ?? '—' }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </details>
+</section>
