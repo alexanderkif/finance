@@ -83,7 +83,8 @@ change.
   green/red by candle direction, and color SMA values with their line colors
   when those indicators are enabled. Draw a synchronized vertical hover line
   across all panes, plus a horizontal price crosshair with a left-side value
-  label on the candlestick pane, and keep the ApexCharts toolbar on the right.
+  label on the candlestick pane, and center the ApexCharts toolbar horizontally.
+  Center the latest-values readout horizontally at the bottom of the pane.
 - Keep the RSI 30/70 guide lines but do not render their value labels.
 - Keep candles and indicators more prominent than the muted support/resistance
   levels. Use the shared palette in `theme-palette.ts`.

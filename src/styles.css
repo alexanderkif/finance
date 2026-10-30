@@ -101,6 +101,9 @@ a {
 
 app-price-chart .apexcharts-toolbar {
   z-index: 9;
+  left: 50% !important;
+  right: auto !important;
+  transform: translateX(-50%);
 }
 
 .apexcharts-tooltip {

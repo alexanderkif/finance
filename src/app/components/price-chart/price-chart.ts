@@ -247,7 +247,7 @@ export class PriceChart {
       colors: [palette.up, palette.sma20, palette.sma50, palette.rsi, palette.trend],
       theme: { mode: palette.tooltip },
       dataLabels: { enabled: false },
-      stroke: { curve: 'smooth', width: 1.5 },
+      stroke: { curve: 'straight', width: 1.5 },
       markers: { size: 0, hover: { size: 3 } },
       grid: { borderColor: palette.border, strokeDashArray: 4 },
       legend: { show: false },
@@ -316,7 +316,7 @@ export class PriceChart {
       theme: { mode: palette.tooltip },
       dataLabels: { enabled: false },
       stroke: { width: 0 },
-      fill: { opacity: 1 },
+      fill: { opacity: palette.volumeOpacity },
       grid: { borderColor: palette.border, strokeDashArray: 4 },
       legend: { show: false },
       plotOptions: {
@@ -387,6 +387,7 @@ export class PriceChart {
         min: 0,
         max: 100,
         tickAmount: 2,
+        opposite: true,
         labels: {
           minWidth: 44,
           formatter: (value: number) => formatAxisTick(value, 100, 2),
@@ -647,6 +648,7 @@ export class PriceChart {
       min: scale?.min,
       max: scale?.max,
       stepSize: scale && scale.step > 0 ? scale.step : undefined,
+      opposite: true,
       labels: {
         minWidth: 44,
         formatter: (value: number) => formatAxisTick(value, span, intervals),
@@ -663,6 +665,7 @@ export class PriceChart {
       min: 0,
       max: scale.step > 0 ? scale.max : undefined,
       stepSize: scale.step > 0 ? scale.step : undefined,
+      opposite: true,
       labels: {
         minWidth: 44,
         formatter: (value: number) => formatVolume(value),
@@ -758,9 +761,9 @@ export class PriceChart {
         position: 'left',
         textAnchor: 'start',
         offsetX: 6,
-        borderColor: palette.support,
+        borderColor: palette.supportFill,
         style: {
-          background: palette.support,
+          background: palette.supportFill,
           color: palette.labelText,
           fontSize: '10px',
         },
@@ -774,9 +777,9 @@ export class PriceChart {
         position: 'left',
         textAnchor: 'start',
         offsetX: 6,
-        borderColor: palette.resistance,
+        borderColor: palette.resistanceFill,
         style: {
-          background: palette.resistance,
+          background: palette.resistanceFill,
           color: palette.labelText,
           fontSize: '10px',
         },

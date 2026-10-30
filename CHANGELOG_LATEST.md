@@ -1,6 +1,6 @@
 # Phase log
 
-## Phase 4 — Dashboard and providers (in progress)
+## Phase 4 — Dashboard and providers
 
 - Selected free, non-commercial providers: Twelve Data Basic for daily candles,
   Finnhub free for news, CBOE delayed for options, quote, and VIX.
@@ -71,8 +71,56 @@
 - Live verification on 2026-10-29: XSP returned 132 CBOE history candles with
   `source: "cboe_index_history"` and `volume_unavailable`, while SPY returned
   132 Twelve Data candles with volume.
-- GATE 4 remains open: a real-browser pass still needs to exercise chart
-  rendering, trend-line drawing, the theme switch, and the analysis card.
+- GATE 4 passed on 2026-10-30 with a headless Chrome pass against `vercel dev`:
+  the SPY dashboard showed live CBOE price 761.69 (-0.98%), VIX 18.50, three
+  Finnhub headlines, three support and one resistance level, two chart panes,
+  the accessible table, and the Delayed 15 min badge. The theme switched to
+  dark and persisted; SMA 20 turned on and appeared in the readout; a
+  keyboard-drawn trend line enabled Clear; `Use example` loaded a live
+  2026-12-11 SPY 750/745 bull put spread; and `Analyze` rendered the analysis
+  card with the disclaimer.
+- The price and headline cards now show explicit loading placeholders instead
+  of stale or empty values while data loads, with a matching component test.
+  Also fixed mojibake punctuation in the dashboard template and ticker error.
+
+## Phase 5 — Degradation and end-to-end tests
+
+- CBOE options requests now retry a 5xx once. Without a cache the chain
+  endpoint returns `degraded: true`, `reason: "upstream_error"`, empty
+  contracts, and `as_of: null`; with a cache less than ten minutes old it serves
+  the cached chain with `cached_data`.
+- CBOE 429 responses serve a cache less than ten minutes old with
+  `warnings: ["cached_data"]` and `reason: "rate_limited"`; otherwise the
+  response is empty and degraded. Fresh cache entries are served without an
+  upstream call.
+- Analysis maps CBOE rate limits to `429` and upstream failures to `502` instead
+  of fabricating metrics. Twelve Data 429/5xx and Finnhub 429/5xx degrade only
+  their own dashboard sections, and missing news/candle keys do not block
+  `/api/analysis/run`.
+- New backend tests cover the retry, stale-cache, no-cache, chain 429/5xx,
+  chart 5xx, market news 5xx, and provider-independence paths.
+- GATE 5 passed on 2026-10-30: 93 backend tests pass, 43 frontend tests pass,
+  and the production build succeeds.
+
+## Phase 6 — Chat scope and misuse guardrails
+
+- Added `api/core/guardrails.py`, a deterministic pre-LLM check that enforces
+  the message-size limit, default-symbol format, a two-leg limit, and refuses
+  off-topic, nonsensical, abusive, creative-generation, prompt-injection,
+  secret-probing, and unsupported-strategy requests with a short `422` message.
+- Refused requests make no Gemini call, return no analysis fields, and never
+  echo provider keys or internal instructions. Existing schema validation still
+  checks every Gemini response.
+- Documented the allowed scope and the prohibition on unrelated content
+  generation, personalized advice, trade execution, market manipulation, spam,
+  and other out-of-scope use in `API_SPEC.md`, `README.md`, and
+  `ARCHITECTURE.md`.
+- Added nine guardrail tests covering off-topic, injection with secret-leakage
+  assertions, abusive, oversized, unsupported-strategy, unsupported-symbol,
+  two three-leg phrasings, and missing-field acceptance paths.
+- GATE 6 passed on 2026-10-30: all guardrail tests pass, refused requests make
+  zero Gemini calls, and responses expose no secrets or internal instructions.
+  Backend: 93 tests pass; frontend: 43 tests pass; build succeeds.
 
 ## Phase 3 — Analysis pipeline and metrics
 

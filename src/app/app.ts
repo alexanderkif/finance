@@ -39,6 +39,10 @@ export class App {
     this.browserReady() ? `/api/market/${encodeURIComponent(this.symbol())}` : undefined,
   );
 
+  protected readonly loading = computed(
+    () => !this.browserReady() || this.chart.isLoading() || this.market.isLoading(),
+  );
+
   protected readonly chartData = computed(() =>
     this.chart.hasValue() ? this.chart.value() : undefined,
   );
@@ -139,7 +143,7 @@ export class App {
       this.tickerError.set(null);
       return;
     }
-    this.tickerError.set('Use 1вЂ“15 characters: letters, digits, dot, dash, or underscore.');
+    this.tickerError.set('Use 1–15 characters: letters, digits, dot, dash, or underscore.');
   }
 
   protected selectSymbol(symbol: string): void {

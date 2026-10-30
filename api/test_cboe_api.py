@@ -11,10 +11,6 @@ class OpenApiSchema(BaseModel):
     paths: dict[str, object]
 
 
-class ProviderErrorResponse(BaseModel):
-    detail: str
-
-
 def cboe_options_payload() -> dict[str, object]:
     return {
         "timestamp": "2026-10-28T15:48:15Z",
@@ -101,17 +97,76 @@ class CboeOptionsApiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 422)
 
-    async def test_chain_endpoint_reports_upstream_errors_without_market_values(
+    async def test_chain_endpoint_degrades_after_a_retried_upstream_error(
         self,
     ) -> None:
         self.status_code = 503
 
         response = await self.api_client.get("/api/options/chain/SPY")
 
-        self.assertEqual(response.status_code, 502)
-        error = ProviderErrorResponse.model_validate(response.json())
-        self.assertIn("HTTP 503", error.detail)
+        self.assertEqual(response.status_code, 200)
+        body = OptionChainResponse.model_validate(response.json())
+        self.assertEqual(body.contracts, [])
+        self.assertIsNone(body.as_of)
+        self.assertTrue(body.degraded)
+        self.assertEqual(body.reason, "upstream_error")
+        self.assertEqual(body.warnings, ["upstream_error"])
+        self.assertEqual(len(self.requests), 2)
+
+    async def test_chain_endpoint_degrades_on_a_rate_limit_without_a_cache(
+        self,
+    ) -> None:
+        self.status_code = 429
+
+        response = await self.api_client.get("/api/options/chain/SPY")
+
+        self.assertEqual(response.status_code, 200)
+        body = OptionChainResponse.model_validate(response.json())
+        self.assertEqual(body.contracts, [])
+        self.assertIsNone(body.as_of)
+        self.assertTrue(body.degraded)
+        self.assertEqual(body.reason, "rate_limited")
+        self.assertEqual(body.warnings, ["rate_limited"])
         self.assertEqual(len(self.requests), 1)
+
+    async def test_chain_endpoint_serves_a_fresh_cache_without_upstream_call(
+        self,
+    ) -> None:
+        await self.api_client.get("/api/options/chain/SPY")
+        self.status_code = 429
+
+        response = await self.api_client.get("/api/options/chain/SPY")
+
+        self.assertEqual(response.status_code, 200)
+        body = OptionChainResponse.model_validate(response.json())
+        self.assertEqual(len(body.contracts), 1)
+        self.assertFalse(body.degraded)
+        self.assertEqual(body.warnings, [])
+        self.assertEqual(len(self.requests), 1)
+
+    async def test_chain_endpoint_serves_a_stale_cache_on_a_rate_limit(
+        self,
+    ) -> None:
+        first = await self.api_client.get("/api/options/chain/SPY")
+        self.assertEqual(first.status_code, 200)
+        provider = app.state.cboe_options_provider
+        self.assertIsNotNone(provider)
+        provider._cache_ttl_seconds = 0
+        self.status_code = 429
+
+        response = await self.api_client.get("/api/options/chain/SPY")
+
+        self.assertEqual(response.status_code, 200)
+        body = OptionChainResponse.model_validate(response.json())
+        self.assertEqual(len(body.contracts), 1)
+        self.assertEqual(
+            body.as_of,
+            datetime(2026, 10, 28, 15, 48, 15, tzinfo=UTC),
+        )
+        self.assertTrue(body.degraded)
+        self.assertEqual(body.reason, "rate_limited")
+        self.assertEqual(body.warnings, ["cached_data"])
+        self.assertEqual(len(self.requests), 2)
 
     async def test_options_endpoint_is_documented_in_openapi(self) -> None:
         response = await self.api_client.get("/api/openapi.json")

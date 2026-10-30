@@ -109,10 +109,11 @@ unavailable, report `vix: null` with a warning.
 - Sections degrade independently: a news failure must not remove the quote,
   VIX, candles, or options chain.
 - On CBOE HTTP 429, serve a cached chain only if it is less than ten minutes
-  old. Otherwise return `degraded: true` with
-  `reason: "rate_limited"`.
-- On CBOE HTTP 5xx, retry once, then return a degraded response with a clear
-  reason.
+  old, with a `cached_data` warning. Otherwise return `degraded: true` with
+  `reason: "rate_limited"` and no contracts.
+- On CBOE HTTP 5xx, retry once. If the retry fails, serve a cached chain less
+  than ten minutes old with a `cached_data` warning; otherwise return
+  `degraded: true` with `reason: "upstream_error"` and no contracts.
 - Never fabricate values. Represent unavailable fields as `null` or `[]` and
   include a warning.
 - Preserve source attribution and the real data timestamp when serving cached

@@ -9,21 +9,19 @@ describe('chart palette contrast', () => {
   const light = chartPalette('light');
   const dark = chartPalette('dark');
 
-  it('keeps level text readable on light panels', () => {
-    expect(contrastRatio(light.support, LIGHT_PANEL)).toBeGreaterThanOrEqual(AA_TEXT);
-    expect(contrastRatio(light.resistance, LIGHT_PANEL)).toBeGreaterThanOrEqual(AA_TEXT);
-  });
-
-  it('keeps level text readable on dark panels', () => {
-    expect(contrastRatio(dark.support, DARK_PANEL)).toBeGreaterThanOrEqual(AA_TEXT);
-    expect(contrastRatio(dark.resistance, DARK_PANEL)).toBeGreaterThanOrEqual(AA_TEXT);
+  it('keeps level lines above non-text contrast', () => {
+    const nonText = 3;
+    expect(contrastRatio(light.support, LIGHT_PANEL)).toBeGreaterThanOrEqual(nonText);
+    expect(contrastRatio(light.resistance, LIGHT_PANEL)).toBeGreaterThanOrEqual(nonText);
+    expect(contrastRatio(dark.support, DARK_PANEL)).toBeGreaterThanOrEqual(nonText);
+    expect(contrastRatio(dark.resistance, DARK_PANEL)).toBeGreaterThanOrEqual(nonText);
   });
 
   it('keeps annotation labels readable on their backgrounds', () => {
-    expect(contrastRatio(light.labelText, light.support)).toBeGreaterThanOrEqual(AA_TEXT);
-    expect(contrastRatio(light.labelText, light.resistance)).toBeGreaterThanOrEqual(AA_TEXT);
-    expect(contrastRatio(dark.labelText, dark.support)).toBeGreaterThanOrEqual(AA_TEXT);
-    expect(contrastRatio(dark.labelText, dark.resistance)).toBeGreaterThanOrEqual(AA_TEXT);
+    expect(contrastRatio(light.labelText, light.supportFill)).toBeGreaterThanOrEqual(AA_TEXT);
+    expect(contrastRatio(light.labelText, light.resistanceFill)).toBeGreaterThanOrEqual(AA_TEXT);
+    expect(contrastRatio(dark.labelText, dark.supportFill)).toBeGreaterThanOrEqual(AA_TEXT);
+    expect(contrastRatio(dark.labelText, dark.resistanceFill)).toBeGreaterThanOrEqual(AA_TEXT);
   });
 
   it('keeps axis text readable on both backgrounds', () => {

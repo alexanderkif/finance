@@ -3,6 +3,8 @@ import { Theme } from './services/preferences';
 export interface ChartPalette {
   support: string;
   resistance: string;
+  supportFill: string;
+  resistanceFill: string;
   labelText: string;
   sma20: string;
   sma50: string;
@@ -12,24 +14,28 @@ export interface ChartPalette {
   down: string;
   volumeUp: string;
   volumeDown: string;
+  volumeOpacity: number;
   text: string;
   border: string;
   tooltip: 'light' | 'dark';
 }
 
 const LIGHT: ChartPalette = {
-  support: '#2f6b4f',
-  resistance: '#8a3b3b',
-  labelText: '#ffffff',
-  sma20: '#b45309',
-  sma50: '#1d4ed8',
-  rsi: '#7e22ce',
-  trend: '#0f766e',
-  up: '#15803d',
-  down: '#b91c1c',
-  volumeUp: 'rgba(21, 128, 61, 0.72)',
-  volumeDown: 'rgba(185, 28, 28, 0.72)',
-  text: '#334155',
+  support: '#0aa55f',
+  resistance: '#e06a6a',
+  supportFill: '#bfe8d2',
+  resistanceFill: '#f6cece',
+  labelText: '#0b1017',
+  sma20: '#d77c00',
+  sma50: '#457bdc',
+  rsi: '#8f63dd',
+  trend: '#b86acb',
+  up: '#00a85c',
+  down: '#ef4444',
+  volumeUp: '#0aa55f',
+  volumeDown: '#e06a6a',
+  volumeOpacity: 1,
+  text: '#475569',
   border: '#dbe3ec',
   tooltip: 'light',
 };
@@ -37,15 +43,18 @@ const LIGHT: ChartPalette = {
 const DARK: ChartPalette = {
   support: '#9fd6b8',
   resistance: '#f2aaaa',
+  supportFill: '#9fd6b8',
+  resistanceFill: '#f2aaaa',
   labelText: '#0b1017',
   sma20: '#fbbf24',
   sma50: '#60a5fa',
   rsi: '#c084fc',
-  trend: '#2dd4bf',
+  trend: '#e6b8f2',
   up: '#4ade80',
   down: '#f87171',
-  volumeUp: 'rgba(74, 222, 128, 0.62)',
-  volumeDown: 'rgba(248, 113, 113, 0.62)',
+  volumeUp: '#4ade80',
+  volumeDown: '#f87171',
+  volumeOpacity: 0.62,
   text: '#c3ccd9',
   border: '#2a3544',
   tooltip: 'dark',

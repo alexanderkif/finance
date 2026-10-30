@@ -81,11 +81,24 @@ contracts expiring on that date. Without it, return the available chain.
 Response fields:
 
 ```text
-symbol, expiration|null, contracts: OptionQuote[], source, as_of, warnings[]
+symbol, expiration|null, contracts: OptionQuote[], source, as_of,
+degraded, reason|null, warnings[]
 ```
 
 `OptionQuote` includes the normalized fields defined in
 [DATA_CONTRACT.md](DATA_CONTRACT.md).
+
+- `as_of` is `null` only when no usable chain is available.
+- On CBOE HTTP 429, serve a cached chain up to ten minutes old with
+  `warnings: ["cached_data"]`, `degraded: true`, and
+  `reason: "rate_limited"`. Without a cache, return empty contracts with
+  `warnings: ["rate_limited"]`.
+- On CBOE HTTP 5xx, retry once. If the retry fails, serve a cached chain up to
+  ten minutes old with `warnings: ["cached_data"]` and
+  `reason: "upstream_error"`. Without a cache, return empty contracts with
+  `warnings: ["upstream_error"]`.
+- Degraded chain responses keep the real cached `as_of` timestamp and never
+  fabricate contracts or values.
 
 ## `POST /api/analysis/parse`
 
@@ -115,6 +128,32 @@ dates to `YYYY-MM-DD` and classify a vertical spread only when its legs satisfy
 the truth table in [PLAYBOOK_SPEC.md](PLAYBOOK_SPEC.md). When expiration is the
 only missing leg field, return exactly `missing_fields: ["expiration"]`; do
 not start analysis.
+
+## Chat scope and misuse guardrails
+
+The assistant is limited to parsing and evaluating a single option or a two-leg
+vertical spread for the selected instrument, plus questions about that analysis.
+It is not a general-purpose chatbot.
+
+- Before any Gemini call, `POST /api/analysis/parse` enforces the message size,
+  default-symbol format, a deterministic two-leg limit, and a scope check.
+- Off-topic, nonsensical, abusive, creative-generation, prompt-injection,
+  secret-probing, and unsupported-strategy requests are refused with HTTP `422`
+  and a short `detail` message. Refusals make no Gemini call, return no analysis
+  fields, and never echo system instructions, prompts, or provider keys.
+- Oversized messages and invalid default symbols are rejected by request
+  validation before the handler runs.
+- The same deterministic limits apply to messages merged from missing-field
+  follow-ups; a message with more than two buy/sell legs is refused.
+- Allowed strategies are a single long/short call or put and the four two-leg
+  vertical spreads. Multi-leg strategies such as iron condors, butterflies,
+  straddles, strangles, calendars, and diagonals are out of scope.
+- The service must not be repurposed for unrelated content generation,
+  personalized financial advice, trade execution or routing, market
+  manipulation, spam, or other personal use outside the intended options
+  analysis.
+- System instructions, provider keys, and internal prompts stay server-side and
+  are never returned. Every Gemini response is validated against its schema.
 
 ## `GET /api/analysis/example/{symbol}`
 
@@ -261,8 +300,16 @@ disclaimer: "Educational analysis, not investment advice."
   restriction, and an unknown symbol.
 - Verify the example endpoint picks a future expiration, a near-money strike,
   and the next lower strike, and returns a verbose message.
-- Mock CBOE 503 and verify degraded output without fabricated values.
-- Mock CBOE 429 with a fresh cache and verify the cached chain is served.
+- Mock CBOE 503 and verify the single retry, then a degraded response with no
+  fabricated values.
+- Mock CBOE 429 with a fresh cache and verify no upstream call is made; with a
+  stale cache under ten minutes, verify the cached chain, `cached_data`, and
+  `reason: "rate_limited"`; with no cache, verify empty degraded output.
+- Verify unavailable Twelve Data and Finnhub sections do not block options
+  analysis.
+- Verify off-topic, abusive, unsupported-strategy, oversized, and
+  prompt-injection requests are refused before Gemini, and that refusals expose
+  no secrets or internal instructions.
 - Verify the frontend restores the selected ticker and theme from
   `localStorage`, defaults the ticker to SPY, and applies the OS theme when no
   choice is stored.
