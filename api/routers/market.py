@@ -2,7 +2,11 @@ from datetime import datetime
 from typing import Literal
 
 import httpx
-from core.cboe_provider import CboePayloadError
+from core.cboe_provider import (
+    CboePayloadError,
+    CboeRateLimitedError,
+    CboeUnavailableError,
+)
 from core.finnhub_provider import (
     FinnhubConfigurationError,
     FinnhubProvider,
@@ -69,7 +73,14 @@ async def get_market(symbol: str, request: Request) -> MarketResponse:
 
     try:
         quote = await provider.get_market_quote(normalized_symbol)
-    except (httpx.HTTPStatusError, httpx.RequestError, CboePayloadError, ValueError):
+    except (
+        httpx.HTTPStatusError,
+        httpx.RequestError,
+        CboePayloadError,
+        CboeRateLimitedError,
+        CboeUnavailableError,
+        ValueError,
+    ):
         warnings.append("quote_unavailable")
     if quote is not None:
         if quote.price is None:
@@ -79,7 +90,14 @@ async def get_market(symbol: str, request: Request) -> MarketResponse:
 
     try:
         vix_quote = await provider.get_index_quote("VIX")
-    except (httpx.HTTPStatusError, httpx.RequestError, CboePayloadError, ValueError):
+    except (
+        httpx.HTTPStatusError,
+        httpx.RequestError,
+        CboePayloadError,
+        CboeRateLimitedError,
+        CboeUnavailableError,
+        ValueError,
+    ):
         warnings.append("vix_unavailable")
     if vix_quote is not None and vix_quote.price is None:
         warnings.append("vix_unavailable")

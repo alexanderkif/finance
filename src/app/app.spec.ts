@@ -156,6 +156,20 @@ describe('App', () => {
     expect(compiled.querySelector('app-analysis-chat')).not.toBeNull();
   });
 
+  it('shows placeholders instead of stale values while data loads', () => {
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    const compiled = fixture.nativeElement as HTMLElement;
+
+    expect(compiled.querySelector('.eyebrow')?.textContent).toContain('Last price');
+    expect(compiled.querySelector('.price')?.textContent?.trim()).toBe('—');
+    expect(compiled.querySelector('.change')?.textContent).toContain('Loading price');
+
+    const httpTesting = TestBed.inject(HttpTestingController);
+    httpTesting.expectOne('/api/chart/SPY?range=6mo&interval=1d').flush(chartStub);
+    httpTesting.expectOne('/api/market/SPY').flush(marketStub);
+  });
+
   it('switches the selected instrument from a chip', async () => {
     const { fixture, compiled } = await renderDashboard();
     const httpTesting = TestBed.inject(HttpTestingController);

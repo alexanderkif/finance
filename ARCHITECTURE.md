@@ -95,11 +95,22 @@ not perform arithmetic. Deterministic limits and a scope check run before
 extraction: off-topic, oversized, abusive, or prompt-injection input is refused
 without a Gemini call and without an analysis card.
 
+## Guardrails
+
+`api/core/guardrails.py` runs synchronously before extraction. It enforces the
+message size and default-symbol format, a deterministic two-leg limit, and
+refuses off-topic, nonsensical, abusive, creative-generation,
+prompt-injection, secret-probing, and unsupported-strategy requests. Refused
+requests return a short message with no analysis fields and make no Gemini
+call. These limits apply to any merged missing-field follow-up text.
+
 ## Current implementation
 
 The Yahoo Finance endpoints and the "Yahoo Finance API" title have been removed.
 The API is now `Options Strategy Assistant API` and exposes market, chart,
-options, parse, and analysis routes. Phase 4 frontend verification is pending a
-browser pass with real Twelve Data and Finnhub keys; the integrated
-`vercel dev` routes, CBOE quote/VIX, and the Twelve Data chart endpoint have
-been verified with the Twelve Data demo key.
+options, parse, and analysis routes. CBOE 429/5xx responses now serve a cache
+less than ten minutes old or an explicit degraded response, and unavailable
+news or candle providers do not block options analysis. Phase 4 frontend
+verification is still pending a real-browser pass; the integrated `vercel dev`
+routes, CBOE quote/VIX, and the Twelve Data chart endpoint have been verified
+with the Twelve Data demo key.

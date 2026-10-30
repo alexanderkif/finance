@@ -58,21 +58,25 @@
             </button>
           }
         </div>
-        <div class="price-block">
-          <span class="eyebrow">{{ symbol() }} В· last price</span>
+        <div class="price-block" [attr.aria-busy]="loading()">
+          <span class="eyebrow">Last price</span>
           <span class="price">
-            @if (price() !== null) {
+            @if (loading()) {
+              <span class="placeholder" aria-hidden="true">—</span>
+            } @else if (price() !== null) {
               {{ price() | number: '1.2-2' }}
             } @else {
-              вЂ”
+              <span class="placeholder">—</span>
             }
           </span>
-          @if (changePct() !== null) {
+          @if (loading()) {
+            <span class="change muted" role="status">Loading price…</span>
+          } @else if (changePct() !== null) {
             <span class="change" [class.negative]="(changePct() ?? 0) < 0">
               {{ (changePct() ?? 0) >= 0 ? '+' : '' }}{{ changePct() | number: '1.2-2' }}%
             </span>
           } @else {
-            <span class="change muted">change unavailable</span>
+            <span class="change muted">Change unavailable</span>
           }
         </div>
       </article>
@@ -144,7 +148,7 @@
               @if (vix() !== null) {
                 {{ vix() | number: '1.2-2' }}
               } @else {
-                вЂ”
+                —
               }
             </dd>
           </div>
@@ -154,13 +158,13 @@
               @if (asOf(); as updated) {
                 {{ updated | date: 'medium' }}
               } @else {
-                вЂ”
+                —
               }
             </dd>
           </div>
         </dl>
         @if (sourceLabels().length > 0) {
-          <p class="sources">Sources: {{ sourceLabels().join(' В· ') }}</p>
+          <p class="sources">Sources: {{ sourceLabels().join(' · ') }}</p>
         }
         @if (market.error()) {
           <p class="field-error" role="alert">
@@ -171,7 +175,9 @@
 
       <article class="card news-card">
         <h2>Top headlines</h2>
-        @if (news().length > 0) {
+        @if (loading()) {
+          <p class="muted" role="status">Loading headlines…</p>
+        } @else if (news().length > 0) {
           <ul class="news-list">
             @for (item of news(); track item.url) {
               <li>
@@ -181,7 +187,7 @@
                 <span class="news-meta">
                   {{ item.publisher ?? 'News' }}
                   @if (item.published_at) {
-                    В· {{ item.published_at | date: 'short' }}
+                    · {{ item.published_at | date: 'short' }}
                   }
                 </span>
               </li>
@@ -203,7 +209,7 @@
 
     <div class="chart-panel">
       @if (!browserReady() || chart.isLoading()) {
-        <div class="chart-placeholder" aria-busy="true">Loading candlesвЂ¦</div>
+        <div class="chart-placeholder" aria-busy="true">Loading candles…</div>
       } @else if (chartData(); as chartData) {
         @if (chartData.candles.length > 0) {
           <app-price-chart [data]="chartData" [theme]="theme()" />

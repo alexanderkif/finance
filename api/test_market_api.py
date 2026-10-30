@@ -194,6 +194,18 @@ class MarketApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("news_rate_limited", body.warnings)
         self.assertEqual(body.price, 772.31)
 
+    async def test_market_reports_news_5xx_without_blocking_quote_and_vix(self) -> None:
+        self.finnhub_status = 503
+
+        response = await self.api_client.get("/api/market/SPY")
+
+        self.assertEqual(response.status_code, 200)
+        body = MarketResponse.model_validate(response.json())
+        self.assertEqual(body.news, [])
+        self.assertIn("news_unavailable", body.warnings)
+        self.assertEqual(body.price, 772.31)
+        self.assertEqual(body.vix, 17.11)
+
     async def test_market_requests_do_not_leak_the_news_key(self) -> None:
         await self.api_client.get("/api/market/SPY")
 

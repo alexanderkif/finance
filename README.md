@@ -132,6 +132,21 @@ reachable during the static build. Trend lines can be drawn with the mouse or
 with the keyboard (focus the chart, move with the arrow keys, confirm with
 Enter, cancel with Escape).
 
+## Chat scope and misuse protection
+
+The assistant is limited to a single option or a two-leg vertical spread for the
+selected instrument and to questions about that analysis. It is not a
+general-purpose chatbot. Before any Gemini call, the API applies deterministic
+message-size, leg-count, symbol, and strategy checks and refuses off-topic,
+nonsensical, abusive, creative-generation, prompt-injection, secret-probing, and
+unsupported-strategy requests with a short message and no analysis. Refusals
+make no Gemini call. System instructions, provider keys, and internal prompts
+stay server-side and are never returned.
+
+The service must not be repurposed for unrelated content generation,
+personalized financial advice, trade execution or routing, market manipulation,
+spam, or other personal use outside the intended options analysis.
+
 ## Providers and licence note
 
 - CBOE delayed: options chain, underlying quote, VIX.

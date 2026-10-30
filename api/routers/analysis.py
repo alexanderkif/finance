@@ -4,7 +4,13 @@ from typing import Literal
 
 import httpx
 from agent.graph import AnalysisResult, run_analysis
-from core.cboe_provider import CboePayloadError, parse_occ_symbol
+from core.cboe_provider import (
+    CboePayloadError,
+    CboeRateLimitedError,
+    CboeUnavailableError,
+    parse_occ_symbol,
+)
+from core.guardrails import GuardrailViolation, check_chat_request
 from core.gemini_provider import (
     ExtractedPosition,
     GeminiConfigurationError,
@@ -200,6 +206,11 @@ async def parse_analysis(
     body: ParseRequest,
     request: Request,
 ) -> ParseResponse:
+    try:
+        check_chat_request(body.message, body.default_symbol)
+    except GuardrailViolation as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
     client = getattr(request.app.state, "http_client", None)
     if not isinstance(client, httpx.AsyncClient):
         raise HTTPException(status_code=503, detail="Analysis service is not ready.")
@@ -276,6 +287,10 @@ async def run_analysis_endpoint(
         raise HTTPException(status_code=502, detail=str(error)) from error
     except GeminiResponseError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
+    except CboeRateLimitedError as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
+    except CboeUnavailableError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
     except httpx.HTTPStatusError as error:
         status_code = 404 if error.response.status_code == 404 else 502
         raise HTTPException(
@@ -306,6 +321,10 @@ async def get_analysis_example(
     try:
         chain = await provider.get_chain(symbol)
         quote = await provider.get_market_quote(symbol)
+    except CboeRateLimitedError as error:
+        raise HTTPException(status_code=429, detail=str(error)) from error
+    except CboeUnavailableError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
     except httpx.HTTPStatusError as error:
         status_code = 404 if error.response.status_code == 404 else 502
         raise HTTPException(

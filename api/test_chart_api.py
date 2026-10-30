@@ -150,6 +150,17 @@ class ChartApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body.warnings, ["candles_rate_limited"])
         self.assertTrue(body.degraded)
 
+    async def test_chart_degrades_on_upstream_5xx(self) -> None:
+        self.status_code = 503
+
+        response = await self.api_client.get("/api/chart/SPY")
+
+        self.assertEqual(response.status_code, 200)
+        body = ChartResponse.model_validate(response.json())
+        self.assertEqual(body.candles, [])
+        self.assertEqual(body.warnings, ["candles_unavailable"])
+        self.assertTrue(body.degraded)
+
     async def test_chart_returns_404_for_an_unknown_symbol(self) -> None:
         self.status_code = 404
 

@@ -1,10 +1,12 @@
 from datetime import date
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
 from core.cboe_provider import (
     CboeOptionsProvider,
     CboePayloadError,
+    CboeRateLimitedError,
+    CboeUnavailableError,
     OptionChainResponse,
 )
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -44,6 +46,10 @@ async def get_options_chain(
     provider = get_options_provider(request)
     try:
         return await provider.get_chain(symbol, expiration)
+    except CboeRateLimitedError:
+        return _unavailable_chain(symbol, "rate_limited")
+    except CboeUnavailableError:
+        return _unavailable_chain(symbol, "upstream_error")
     except httpx.RequestError as error:
         raise HTTPException(
             status_code=502,
@@ -59,3 +65,18 @@ async def get_options_chain(
         raise HTTPException(status_code=502, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+def _unavailable_chain(
+    symbol: str,
+    reason: Literal["rate_limited", "upstream_error"],
+) -> OptionChainResponse:
+    normalized_symbol = symbol.strip().upper().removeprefix("_").removeprefix("^")
+    return OptionChainResponse(
+        symbol=normalized_symbol,
+        contracts=[],
+        as_of=None,
+        degraded=True,
+        reason=reason,
+        warnings=[reason],
+    )

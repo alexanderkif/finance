@@ -220,6 +220,22 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("iv_rank_unavailable", body["warnings"])
         self.assertEqual(body["recommendation"], RECOMMENDATION)
 
+    async def test_run_does_not_depend_on_chart_or_news_providers(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"TWELVE_DATA_API_KEY": "", "FINNHUB_API_KEY": ""},
+        ):
+            response = await self.api_client.post(
+                "/api/analysis/run", json=spread_body()
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["header"],
+            "Bull Put Spread SPY 732/729 2030-11-15",
+        )
+        self.assertEqual(len(self.gemini_requests), 1)
+
     async def test_run_uses_one_gemini_call_with_computed_facts(self) -> None:
         await self.api_client.post("/api/analysis/run", json=spread_body())
 

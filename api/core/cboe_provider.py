@@ -14,6 +14,7 @@ CBOE_QUOTE_URL: Final = (
     "https://cdn.cboe.com/api/global/delayed_quotes/quotes/{symbol}.json"
 )
 CBOE_CACHE_TTL_SECONDS: Final = 60.0
+CBOE_STALE_CACHE_SECONDS: Final = 600.0
 _INDEX_SYMBOLS: Final = frozenset({"SPX", "VIX", "NDX", "XSP"})
 _OCC_SYMBOL_PATTERN: Final = re.compile(
     r"^(?P<root>[A-Z0-9.]+?)(?P<expiration>\d{6})(?P<option_type>[CP])"
@@ -27,7 +28,19 @@ def _utc(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
-class CboePayloadError(RuntimeError):
+class CboeProviderError(RuntimeError):
+    pass
+
+
+class CboePayloadError(CboeProviderError):
+    pass
+
+
+class CboeRateLimitedError(CboeProviderError):
+    pass
+
+
+class CboeUnavailableError(CboeProviderError):
     pass
 
 
@@ -94,7 +107,9 @@ class OptionChainResponse(BaseModel):
     expiration: date | None = None
     contracts: list[CboeOptionQuote]
     source: Literal["cboe_delayed"] = "cboe_delayed"
-    as_of: datetime
+    as_of: datetime | None = None
+    degraded: bool = False
+    reason: Literal["rate_limited", "upstream_error"] | None = None
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -198,18 +213,57 @@ class CboeOptionsProvider:
         self._cache: dict[str, tuple[float, _CboeOptionsPayload]] = {}
         self._quote_cache: dict[str, tuple[float, _CboeQuotePayload]] = {}
 
-    async def _get_payload(self, symbol: str) -> tuple[str, _CboeOptionsPayload]:
+    async def _request(self, url: str) -> httpx.Response:
+        response = await self._client.get(url, follow_redirects=True)
+        if 500 <= response.status_code < 600:
+            response = await self._client.get(url, follow_redirects=True)
+        return response
+
+    def _stale_cached(
+        self,
+        cached: tuple[float, _CboeOptionsPayload] | None,
+    ) -> _CboeOptionsPayload | None:
+        if cached is None:
+            return None
+        if time.monotonic() - cached[0] >= CBOE_STALE_CACHE_SECONDS:
+            return None
+        return cached[1]
+
+    async def _get_payload(
+        self,
+        symbol: str,
+    ) -> tuple[
+        str,
+        _CboeOptionsPayload,
+        list[str],
+        Literal["rate_limited", "upstream_error"] | None,
+    ]:
         normalized_symbol = normalize_cboe_symbol(symbol)
         cached = self._cache.get(normalized_symbol)
-        now = time.monotonic()
-        if cached is not None and now - cached[0] < self._cache_ttl_seconds:
-            return normalized_symbol, cached[1]
+        if (
+            cached is not None
+            and time.monotonic() - cached[0] < self._cache_ttl_seconds
+        ):
+            return normalized_symbol, cached[1], [], None
 
         url_symbol = quote(normalized_symbol, safe="_")
-        response = await self._client.get(
+        response = await self._request(
             CBOE_OPTIONS_URL.format(symbol=url_symbol),
-            follow_redirects=True,
         )
+
+        if response.status_code == 429:
+            stale = self._stale_cached(cached)
+            if stale is not None:
+                return normalized_symbol, stale, ["cached_data"], "rate_limited"
+            raise CboeRateLimitedError("CBOE rate limit was reached.")
+        if 500 <= response.status_code < 600:
+            stale = self._stale_cached(cached)
+            if stale is not None:
+                return normalized_symbol, stale, ["cached_data"], "upstream_error"
+            raise CboeUnavailableError(
+                f"CBOE returned HTTP {response.status_code}."
+            )
+
         response.raise_for_status()
 
         try:
@@ -224,18 +278,21 @@ class CboeOptionsProvider:
             raise CboePayloadError("CBOE returned data for an unexpected symbol.")
 
         self._cache[normalized_symbol] = (time.monotonic(), payload)
-        return normalized_symbol, payload
+        return normalized_symbol, payload, [], None
 
     async def get_chain(
         self,
         symbol: str,
         expiration: date | None = None,
     ) -> OptionChainResponse:
-        _, payload = await self._get_payload(symbol)
+        _, payload, cache_warnings, reason = await self._get_payload(symbol)
         result = OptionChainResponse(
             symbol=_bare_symbol(symbol),
             contracts=payload.data.options,
             as_of=payload.timestamp,
+            degraded=bool(cache_warnings),
+            reason=reason,
+            warnings=list(cache_warnings),
         )
         if expiration is None:
             return result
@@ -249,26 +306,23 @@ class CboeOptionsProvider:
             elif contract_expiration == expiration:
                 contracts.append(contract)
 
-        warnings = (
-            [
-                (
-                    f"Excluded {unrecognized_symbols} contracts with unrecognized "
-                    "option symbols from the expiration filter."
-                )
-            ]
-            if unrecognized_symbols
-            else []
-        )
+        warnings = list(cache_warnings)
+        if unrecognized_symbols:
+            warnings.append(
+                f"Excluded {unrecognized_symbols} contracts with unrecognized "
+                "option symbols from the expiration filter."
+            )
         return result.model_copy(
             update={
                 "expiration": expiration,
                 "contracts": contracts,
                 "warnings": warnings,
+                "degraded": bool(warnings),
             }
         )
 
     async def get_market_quote(self, symbol: str) -> CboeMarketQuote:
-        _, payload = await self._get_payload(symbol)
+        _, payload, _, _ = await self._get_payload(symbol)
         return CboeMarketQuote(
             symbol=_bare_symbol(symbol),
             price=payload.data.current_price,
@@ -279,15 +333,22 @@ class CboeOptionsProvider:
     async def get_index_quote(self, symbol: str) -> CboeIndexQuote:
         normalized_symbol = normalize_cboe_symbol(symbol)
         cached = self._quote_cache.get(normalized_symbol)
-        now = time.monotonic()
-        if cached is not None and now - cached[0] < self._cache_ttl_seconds:
+        if (
+            cached is not None
+            and time.monotonic() - cached[0] < self._cache_ttl_seconds
+        ):
             payload = cached[1]
         else:
             url_symbol = quote(normalized_symbol, safe="_")
-            response = await self._client.get(
+            response = await self._request(
                 CBOE_QUOTE_URL.format(symbol=url_symbol),
-                follow_redirects=True,
             )
+            if response.status_code == 429:
+                raise CboeRateLimitedError("CBOE rate limit was reached.")
+            if 500 <= response.status_code < 600:
+                raise CboeUnavailableError(
+                    f"CBOE returned HTTP {response.status_code}."
+                )
             response.raise_for_status()
             try:
                 payload = _CboeQuotePayload.model_validate(response.json())

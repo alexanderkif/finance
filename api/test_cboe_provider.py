@@ -1,3 +1,4 @@
+import time
 import unittest
 from datetime import UTC, date, datetime
 
@@ -5,6 +6,9 @@ import httpx
 from core.cboe_provider import (
     CboeOptionsProvider,
     CboePayloadError,
+    CboeRateLimitedError,
+    CboeUnavailableError,
+    _CboeOptionsPayload,
     normalize_cboe_symbol,
 )
 
@@ -184,7 +188,7 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request_count, 1)
         self.assertEqual(first, second)
 
-    async def test_does_not_cache_an_http_error(self) -> None:
+    async def test_retries_a_5xx_once_without_caching(self) -> None:
         requests = 0
 
         async def handler(_request: httpx.Request) -> httpx.Response:
@@ -198,11 +202,56 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
 
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             provider = CboeOptionsProvider(client)
-            for _ in range(2):
-                with self.assertRaises(httpx.HTTPStatusError):
-                    await provider.get_chain("SPY")
+            with self.assertRaisesRegex(CboeUnavailableError, "HTTP 503"):
+                await provider.get_chain("SPY")
+            with self.assertRaises(CboeUnavailableError):
+                await provider.get_chain("SPY")
+
+        self.assertEqual(requests, 4)
+
+    async def test_serves_a_stale_cache_after_a_rate_limit(self) -> None:
+        requests = 0
+        status_code = 200
+
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            nonlocal requests
+            requests += 1
+            if status_code != 200:
+                return httpx.Response(status_code)
+            return httpx.Response(200, json=cboe_payload())
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = CboeOptionsProvider(client, cache_ttl_seconds=0)
+            first = await provider.get_chain("SPY")
+            status_code = 429
+            second = await provider.get_chain("SPY")
 
         self.assertEqual(requests, 2)
+        self.assertEqual(second.contracts, first.contracts)
+        self.assertEqual(second.as_of, first.as_of)
+        self.assertTrue(second.degraded)
+        self.assertEqual(second.reason, "rate_limited")
+        self.assertEqual(second.warnings, ["cached_data"])
+
+    async def test_refuses_a_cache_older_than_ten_minutes(self) -> None:
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429)
+
+        payload = _CboeOptionsPayload.model_validate(cboe_payload())
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = CboeOptionsProvider(client, cache_ttl_seconds=0)
+            provider._cache["SPY"] = (time.monotonic() - 601, payload)
+            with self.assertRaises(CboeRateLimitedError):
+                await provider.get_chain("SPY")
+
+    async def test_raises_a_clear_error_when_a_rate_limit_has_no_cache(self) -> None:
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(429)
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = CboeOptionsProvider(client)
+            with self.assertRaises(CboeRateLimitedError):
+                await provider.get_chain("SPY")
 
     async def test_rejects_a_payload_for_a_different_symbol(self) -> None:
         async def handler(_request: httpx.Request) -> httpx.Response:

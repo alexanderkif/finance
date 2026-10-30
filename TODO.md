@@ -75,7 +75,7 @@ Update `CHANGELOG_LATEST.md` with each completed phase.
   `^XSP` in `data.symbol`. Gemini synthesis is mocked; no live model call was
   recorded.
 
-## Phase 4 — Angular dashboard and analysis UI [ ]
+## Phase 4 — Angular dashboard and analysis UI [x]
 
 - [x] Select data sources: Twelve Data Basic for candles, Finnhub free for
       news, CBOE delayed for quote/VIX. Non-commercial tiers; licensed plans
@@ -116,46 +116,63 @@ Update `CHANGELOG_LATEST.md` with each completed phase.
 - [x] Remove the legacy Yahoo Finance endpoints and rename the FastAPI app.
 - [x] Configure real `TWELVE_DATA_API_KEY` and `FINNHUB_API_KEY` values and
       verify the live market, chart, parse, and run endpoints.
-- [ ] Verify the chart interaction, theme switch, and chat analysis card in a
+- [x] Verify the chart interaction, theme switch, and chat analysis card in a
       browser on `vercel dev`.
-- **GATE 4:** partially verified on 2026-10-29. `vercel dev` served `/` (200,
-  title "Options Strategy Assistant"), `/api/docs` (200),
-  `/api/market/SPY` (live CBOE price 767.65 and three Finnhub headlines),
-  `/api/chart/SPY?range=6mo` (132 Twelve Data candles with volume, two SMA
-  series, 118 RSI points, three support levels), `/api/chart/XSP?range=6mo`
-  (132 CBOE daily-history candles, `source: "cboe_index_history"`,
-  `volume_unavailable`), and the full analysis flow: the PRD example parsed to
-  `bull_put_spread` and `run` returned `Bull Put Spread XSP 732/729
-  2026-11-20`, probability 0.8624, max loss 276.00, breakeven 731.76. Backend:
-  75 tests pass. Frontend: 28 tests pass and the production build succeeds. The
-  browser interaction gate (chart render, trend line, theme switch, and
-  analysis card in a real browser) remains open.
+- **GATE 4:** passed on 2026-10-30. A headless Chrome pass against
+  `vercel dev` on `http://localhost:3000/` verified the SPY dashboard with live
+  CBOE price 761.69 (-0.98%), VIX 18.50, three Finnhub headlines, three support
+  and one resistance level, two chart panes, the 12-row accessible chart table,
+  and the **Delayed 15 min** badge. The theme switched from light to dark and
+  persisted as `osa.theme=dark`; SMA 20 turned on and appeared in the readout;
+  a keyboard-drawn trend line enabled Clear; `Use example` produced
+  `Sell the 750 put and buy the 745 put on SPY expiring 2026-12-11`; and
+  `Analyze` rendered `Bull Put Spread SPY 750/745 2026-12-11` with the
+  disclaimer. Earlier on 2026-10-29, `vercel dev` served `/` (200, title
+  "Options Strategy Assistant"), `/api/docs` (200), live `/api/market/SPY`,
+  132-candle `/api/chart/SPY?range=6mo`, XSP candles from
+  `cboe_index_history`, and the PRD analysis flow. Backend: 75 tests passed at
+  that point; frontend: 28 tests passed and the production build succeeded.
 
-## Phase 5 — Degradation and tests [ ]
+## Phase 5 — Degradation and tests [x]
 
-- [ ] Test CBOE 429 with fresh-cache behavior and stale-cache degradation.
-- [ ] Test CBOE 5xx retry and degraded response with no fabricated values.
-- [ ] Verify unavailable news/candles do not block options analysis.
-- [ ] Run all relevant backend and frontend tests.
-- [ ] Update `CHANGELOG_LATEST.md` with verified results.
-- **GATE 5:** all tests pass and mocked CBOE 503 degradation is demonstrated.
+- [x] Test CBOE 429 with fresh-cache behavior and stale-cache degradation.
+- [x] Test CBOE 5xx retry and degraded response with no fabricated values.
+- [x] Verify unavailable news/candles do not block options analysis.
+- [x] Run all relevant backend and frontend tests.
+- [x] Update `CHANGELOG_LATEST.md` with verified results.
+- **GATE 5:** passed on 2026-10-30. CBOE now retries a 5xx once; without a
+  cache it returns `degraded: true`, `reason: "upstream_error"`, empty
+  contracts, and `as_of: null`. On 429 it serves a cache less than ten minutes
+  old with `warnings: ["cached_data"]` and `reason: "rate_limited"` or returns
+  `warnings: ["rate_limited"]` with no contracts. Twelve Data 429/5xx and
+  Finnhub 429/5xx degrade independently, a missing news/candle key does not
+  block `/api/analysis/run`, and mocks prove no fabricated values. Backend: 93
+  tests pass; frontend: 43 tests pass; production build succeeds.
 
-## Phase 6 — Chat scope and misuse guardrails [ ]
+## Phase 6 — Chat scope and misuse guardrails [x]
 
-- [ ] Document the allowed chat scope and state that the assistant is not a
+- [x] Document the allowed chat scope and state that the assistant is not a
       general-purpose chatbot.
-- [ ] Add message-size, leg-count, symbol, and strategy validation before any
+- [x] Add message-size, leg-count, symbol, and strategy validation before any
       Gemini call.
-- [ ] Add a deterministic pre-LLM scope check that refuses off-topic,
+- [x] Add a deterministic pre-LLM scope check that refuses off-topic,
       nonsensical, abusive, and prompt-injection requests with a short message
       and no analysis card.
-- [ ] Keep system instructions, provider keys, and internal prompts server-side,
+- [x] Keep system instructions, provider keys, and internal prompts server-side,
       never echo them, and validate Gemini output against the schema.
-- [ ] Add tests for off-topic requests, prompt injection, oversized input,
+- [x] Add tests for off-topic requests, prompt injection, oversized input,
       unsupported symbols or strategies, secret leakage, and no Gemini call on
       refused requests.
-- [ ] Document that the service must not be repurposed for unrelated content
+- [x] Document that the service must not be repurposed for unrelated content
       generation, personalized financial advice, trade execution, market
       manipulation, spam, or other personal use outside the intended product.
-- **GATE 6:** all guardrail tests pass, refused requests make no Gemini call,
-  and responses expose no secrets or internal instructions.
+- **GATE 6:** passed on 2026-10-30. `api/core/guardrails.py` runs before
+  extraction and enforces the 2,000-character message limit, default-symbol
+  format, a two-buy/sell-leg limit, and short refusals for off-topic,
+  nonsensical, abusive, creative-generation, prompt-injection,
+  secret-probing, and unsupported-strategy requests. Refused requests return
+  `422` with no analysis fields and make zero Gemini calls. Tests cover
+  off-topic, injection, abusive, oversized, unsupported-strategy, unsupported
+  symbol, and three-leg inputs, and assert that refusals expose no key or
+  internal instruction text. Backend: 93 tests pass; frontend: 42 tests pass;
+  production build succeeds.
