@@ -3,6 +3,11 @@ from datetime import date
 from math import sqrt
 from typing import Literal
 
+from core.indicators import (
+    Candle,
+    historical_volatility,
+    historical_volatility_rank,
+)
 from core.playbook_registry import Playbook
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -85,9 +90,15 @@ class PositionMetrics(BaseModel):
     probability_positive: float | None
     theta_daily: float | None
     iv_rank: float | None
+    current_iv: float | None
+    hv_20d: float | None
+    hv_60d: float | None
+    hv_rank: float | None
+    iv_hv_ratio: float | None
     event_flags: list[str]
     liquidity: Liquidity
     scenario_1sigma: Scenario | None
+    scenario_2sigma: Scenario | None
     warnings: list[str]
 
 
@@ -123,6 +134,7 @@ def compute_metrics(
     underlying_price: float | None,
     as_of: date,
     atm_iv: float | None,
+    historical_candles: list[Candle] | None = None,
 ) -> PositionMetrics:
     mids = [executable_mid(leg) for leg in legs]
     net_per_share = sum(
@@ -130,7 +142,7 @@ def compute_metrics(
     )
     net_credit_debit = _money(net_per_share * 100)
 
-    warnings: list[str] = ["iv_rank_unavailable"]
+    warnings: list[str] = []
     max_profit, max_loss, breakeven = _bounded_outcomes(legs, net_per_share)
     probability_positive = _probability_positive(legs, net_per_share)
     if probability_positive is None:
@@ -141,9 +153,26 @@ def compute_metrics(
         warnings.append("theta_unavailable")
 
     days_to_expiration = (legs[0].expiration - as_of).days
-    scenario = _scenario(underlying_price, atm_iv, days_to_expiration)
-    if scenario is None:
+    scenario_1sigma = _scenario(underlying_price, atm_iv, days_to_expiration, sigmas=1)
+    scenario_2sigma = _scenario(underlying_price, atm_iv, days_to_expiration, sigmas=2)
+    if scenario_1sigma is None:
         warnings.append("scenario_1sigma_unavailable")
+    if scenario_2sigma is None:
+        warnings.append("scenario_2sigma_unavailable")
+
+    candles = historical_candles or []
+    hv_20d = historical_volatility(candles, 20)
+    hv_60d = historical_volatility(candles, 60)
+    hv_rank = historical_volatility_rank(candles, 20)
+    if hv_20d is None or hv_60d is None:
+        warnings.append("hv_unavailable")
+    current_iv = round(atm_iv, 4) if atm_iv is not None else None
+    ratio_base = hv_60d if hv_60d is not None else hv_20d
+    iv_hv_ratio = (
+        round(current_iv / ratio_base, 4)
+        if current_iv is not None and ratio_base is not None and ratio_base > 0
+        else None
+    )
 
     return PositionMetrics(
         net_credit_debit=net_credit_debit,
@@ -153,13 +182,19 @@ def compute_metrics(
         probability_positive=probability_positive,
         theta_daily=theta_daily,
         iv_rank=None,
+        current_iv=current_iv,
+        hv_20d=hv_20d,
+        hv_60d=hv_60d,
+        hv_rank=hv_rank,
+        iv_hv_ratio=iv_hv_ratio,
         event_flags=[
             key
             for key in ("earnings", "dividends", "macro")
             if playbook.event_sensitivity.get(key)
         ],
         liquidity=_liquidity(legs),
-        scenario_1sigma=scenario,
+        scenario_1sigma=scenario_1sigma,
+        scenario_2sigma=scenario_2sigma,
         warnings=warnings,
     )
 
@@ -283,14 +318,16 @@ def _scenario(
     underlying_price: float | None,
     atm_iv: float | None,
     days_to_expiration: int,
+    *,
+    sigmas: int = 1,
 ) -> Scenario | None:
     if underlying_price is None or underlying_price <= 0:
         return None
     if atm_iv is None or atm_iv <= 0:
         return None
-    if days_to_expiration <= 0:
+    if days_to_expiration <= 0 or sigmas <= 0:
         return None
-    move = underlying_price * atm_iv * sqrt(days_to_expiration / 365)
+    move = underlying_price * atm_iv * sqrt(days_to_expiration / 365) * sigmas
     return Scenario(
         expected_move=round(move, 2),
         low=round(underlying_price - move, 2),

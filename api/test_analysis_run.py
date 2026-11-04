@@ -1,6 +1,7 @@
 import json
 import os
 import unittest
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import httpx
@@ -10,6 +11,27 @@ RECOMMENDATION = (
     "This credit spread keeps its maximum profit if the underlying stays above "
     "the breakeven level at expiration."
 )
+
+
+def twelve_data_payload(count: int = 120) -> dict[str, object]:
+    values: list[dict[str, str]] = []
+    closes = [100.0]
+    for index in range(count - 1):
+        closes.append(closes[-1] * (1.01 if index % 2 == 0 else 0.992))
+    start = datetime(2026, 1, 1)
+    for index, close in enumerate(closes):
+        values.append(
+            {
+                "datetime": (start + timedelta(days=index)).strftime("%Y-%m-%d"),
+                "open": f"{close:.2f}",
+                "high": f"{close + 1:.2f}",
+                "low": f"{close - 1:.2f}",
+                "close": f"{close:.2f}",
+                "volume": "1000",
+            }
+        )
+    values.reverse()
+    return {"status": "ok", "values": values}
 
 
 def contract(
@@ -140,9 +162,14 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         self.model_result: dict[str, object] = {"recommendation": RECOMMENDATION}
         self.gemini_status = 200
         self.cboe_status = 200
+        self.twelve_data_status = 200
         self.gemini_requests: list[httpx.Request] = []
         self.cboe_requests: list[httpx.Request] = []
-        self.environment = patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"})
+        self.twelve_data_requests: list[httpx.Request] = []
+        self.environment = patch.dict(
+            os.environ,
+            {"GEMINI_API_KEY": "test-key", "TWELVE_DATA_API_KEY": "test-key"},
+        )
         self.environment.start()
         self.addCleanup(self.environment.stop)
         self.http_client = httpx.AsyncClient(
@@ -151,6 +178,10 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         app.state.http_client = self.http_client
         app.state.cboe_options_provider = None
         app.state.cboe_provider_client = None
+        app.state.twelve_data_provider = None
+        app.state.twelve_data_provider_client = None
+        app.state.cboe_history_provider = None
+        app.state.cboe_history_provider_client = None
         self.api_client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
@@ -182,6 +213,11 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
                     ]
                 },
             )
+        if request.url.host == "api.twelvedata.com":
+            self.twelve_data_requests.append(request)
+            if self.twelve_data_status != 200:
+                return httpx.Response(self.twelve_data_status, json={"error": "x"})
+            return httpx.Response(200, json=twelve_data_payload())
         return httpx.Response(404, json={"detail": "unexpected host"})
 
     async def test_run_endpoint_is_documented_in_openapi(self) -> None:
@@ -197,6 +233,7 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         body = response.json()
         self.assertEqual(body["header"], "Bull Put Spread SPY 732/729 2030-11-15")
         self.assertEqual(body["strategy_key"], "bull_put_spread")
+        self.assertEqual(body["intent"], "open")
         self.assertEqual(body["net_credit_debit"], 150.0)
         self.assertEqual(body["max_profit"], 150.0)
         self.assertEqual(body["max_loss"], 150.0)
@@ -204,20 +241,32 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["probability_positive"], 0.7)
         self.assertEqual(body["theta_daily"], 5.0)
         self.assertIsNone(body["iv_rank"])
+        self.assertEqual(body["current_iv"], 0.14)
+        self.assertIsNotNone(body["hv_20d"])
+        self.assertIsNotNone(body["hv_60d"])
+        self.assertIsNotNone(body["hv_rank"])
+        self.assertEqual(
+            body["iv_hv_ratio"],
+            round(0.14 / body["hv_60d"], 4),
+        )
         self.assertEqual(body["event_flags"], ["earnings", "dividends", "macro"])
         self.assertEqual(body["liquidity"]["bid_ask_spread_pct"], 12.5)
         self.assertEqual(body["liquidity"]["open_interest"], 800)
         self.assertEqual(body["liquidity"]["rating"], "fair")
         self.assertEqual(body["scenario_1sigma"]["days_to_expiration"], 22)
+        self.assertEqual(body["scenario_1sigma"]["expected_move"], 26.49)
         self.assertEqual(body["scenario_1sigma"]["atm_iv"], 0.14)
+        self.assertEqual(body["scenario_2sigma"]["days_to_expiration"], 22)
+        self.assertEqual(body["scenario_2sigma"]["expected_move"], 52.98)
+        self.assertEqual(body["scenario_2sigma"]["atm_iv"], 0.14)
         self.assertEqual(
             body["disclaimer"], "Educational analysis, not investment advice."
         )
         self.assertEqual(body["detected_language"], "English")
         self.assertEqual(body["source"], "cboe_delayed")
         self.assertTrue(body["as_of"].startswith("2030-10-24T10:05:32"))
-        self.assertTrue(body["degraded"])
-        self.assertIn("iv_rank_unavailable", body["warnings"])
+        self.assertFalse(body["degraded"])
+        self.assertEqual(body["warnings"], [])
         self.assertEqual(body["recommendation"], RECOMMENDATION)
 
     async def test_run_does_not_depend_on_chart_or_news_providers(self) -> None:
@@ -255,7 +304,10 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(facts["language"], "English")
         self.assertEqual(facts["metrics"]["breakeven"], 730.5)
         self.assertEqual(facts["metrics"]["max_loss"], 150.0)
-        self.assertIsNone(facts["metrics"]["iv_rank"])
+        self.assertNotIn("iv_rank", facts["metrics"])
+        self.assertEqual(facts["metrics"]["current_iv"], 0.14)
+        self.assertIsNotNone(facts["metrics"]["hv_60d"])
+        self.assertIsNotNone(facts["metrics"]["iv_hv_ratio"])
 
     async def test_run_returns_an_unbounded_long_call(self) -> None:
         response = await self.api_client.post("/api/analysis/run", json=single_body())

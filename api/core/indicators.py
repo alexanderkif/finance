@@ -1,9 +1,12 @@
 from datetime import datetime
+from math import log, sqrt
+from statistics import stdev
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
 ChartRange = Literal["1mo", "3mo", "6mo", "1y", "5y"]
+VOLATILITY_LOOKBACK_DAYS = 252
 RANGE_OUTPUT_SIZES: dict[ChartRange, int] = {
     "1mo": 22,
     "3mo": 66,
@@ -91,6 +94,45 @@ def relative_strength_index(
             )
         )
     return IndicatorSeries(period=period, points=points)
+
+
+def historical_volatility(candles: list[Candle], window: int) -> float | None:
+    if window < 2 or len(candles) < window + 1:
+        return None
+    closes = [candle.c for candle in candles[-(window + 1) :]]
+    returns = _log_returns(closes)
+    if len(returns) < 2:
+        return None
+    return round(stdev(returns) * sqrt(252), 4)
+
+
+def historical_volatility_rank(
+    candles: list[Candle],
+    window: int = 20,
+    lookback: int = VOLATILITY_LOOKBACK_DAYS,
+) -> float | None:
+    if window < 2 or len(candles) < window + 2:
+        return None
+    sample = candles[-lookback:]
+    values: list[float] = []
+    for end in range(window + 1, len(sample) + 1):
+        value = historical_volatility(sample[:end], window)
+        if value is not None:
+            values.append(value)
+    if len(values) < 2:
+        return None
+    current = values[-1]
+    at_or_below = sum(1 for value in values if value <= current)
+    return round(at_or_below / len(values), 4)
+
+
+def _log_returns(closes: list[float]) -> list[float]:
+    returns: list[float] = []
+    for previous, current in zip(closes, closes[1:]):
+        if previous <= 0 or current <= 0:
+            continue
+        returns.append(log(current / previous))
+    return returns
 
 
 def chart_levels(

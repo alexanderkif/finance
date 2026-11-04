@@ -4,6 +4,7 @@ from typing import Literal
 
 import httpx
 from agent.graph import AnalysisResult, run_analysis
+from core.cboe_history_provider import CboeHistoryError
 from core.cboe_provider import (
     CboePayloadError,
     CboeRateLimitedError,
@@ -19,10 +20,13 @@ from core.gemini_provider import (
     GeminiResponseError,
     extract_position,
 )
+from core.indicators import Candle
 from core.metrics import AnalysisPosition
 from core.playbook_registry import PlaybookKey, load_playbooks
+from core.twelvedata_provider import TwelveDataError
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from routers.chart import get_cboe_history_provider, get_twelve_data_provider
 from routers.options import get_options_provider
 
 router = APIRouter()
@@ -239,6 +243,22 @@ async def parse_analysis(
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 
+async def _load_historical_candles(
+    request: Request,
+    symbol: str,
+) -> list[Candle] | None:
+    history = get_cboe_history_provider(request)
+    if history.supports(symbol):
+        try:
+            return await history.get_index_candles(symbol, "1y")
+        except CboeHistoryError:
+            pass
+    try:
+        return await get_twelve_data_provider(request).get_daily_candles(symbol, "1y")
+    except (TwelveDataError, ValueError):
+        return None
+
+
 @router.post(
     "/api/analysis/run",
     response_model=AnalysisResult,
@@ -280,6 +300,10 @@ async def run_analysis_endpoint(
             detail="The legs do not form a supported single option or vertical spread.",
         )
 
+    historical_candles = await _load_historical_candles(
+        request,
+        body.position.legs[0].symbol,
+    )
     try:
         return await run_analysis(
             client=client,
@@ -289,6 +313,7 @@ async def run_analysis_endpoint(
             strategy_key=strategy_key,
             intent=body.intent,
             detected_language=body.detected_language,
+            historical_candles=historical_candles,
         )
     except GeminiConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error

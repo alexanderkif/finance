@@ -1,7 +1,13 @@
 import unittest
-from datetime import date
+from datetime import date, datetime, timedelta
+from math import exp
 from typing import Literal, cast
 
+from core.indicators import (
+    Candle,
+    historical_volatility,
+    historical_volatility_rank,
+)
 from core.metrics import (
     LegQuote,
     OptionLeg,
@@ -15,6 +21,29 @@ from core.playbook_registry import load_playbooks
 EXPIRATION = date(2030, 11, 15)
 AS_OF = date(2030, 10, 24)
 PLAYBOOKS = load_playbooks()
+
+
+def candles_from_closes(closes: list[float]) -> list[Candle]:
+    start = datetime(2030, 1, 1)
+    return [
+        Candle(
+            t=start + timedelta(days=index),
+            o=close,
+            h=close,
+            l=close,
+            c=close,
+            v=None,
+        )
+        for index, close in enumerate(closes)
+    ]
+
+
+def sample_candles(count: int = 120) -> list[Candle]:
+    closes = [100.0]
+    for index in range(count - 1):
+        close = exp(0.012 if index % 2 == 0 else -0.009)
+        closes.append(closes[-1] * close)
+    return candles_from_closes(closes)
 
 
 def leg(
@@ -89,7 +118,11 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(metrics.probability_positive, 0.7)
         self.assertEqual(metrics.theta_daily, 5.0)
         self.assertIsNone(metrics.iv_rank)
-        self.assertIn("iv_rank_unavailable", metrics.warnings)
+        self.assertIsNone(metrics.hv_20d)
+        self.assertIsNone(metrics.hv_60d)
+        self.assertIsNone(metrics.iv_hv_ratio)
+        self.assertIn("hv_unavailable", metrics.warnings)
+        self.assertNotIn("iv_rank_unavailable", metrics.warnings)
         self.assertEqual(metrics.event_flags, ["earnings", "dividends", "macro"])
         self.assertEqual(metrics.liquidity.bid_ask_spread_pct, 12.5)
         self.assertEqual(metrics.liquidity.open_interest, 800)
@@ -100,6 +133,11 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(scenario.expected_move, 26.47)
         self.assertEqual(scenario.low, 743.53)
         self.assertEqual(scenario.high, 796.47)
+        wide_scenario = cast(Scenario, metrics.scenario_2sigma)
+        self.assertEqual(wide_scenario.days_to_expiration, 22)
+        self.assertEqual(wide_scenario.expected_move, 52.93)
+        self.assertEqual(wide_scenario.low, 717.07)
+        self.assertEqual(wide_scenario.high, 822.93)
 
     def test_bull_call_debit_spread(self) -> None:
         legs = [
@@ -231,7 +269,57 @@ class MetricsTests(unittest.TestCase):
         self.assertIsNone(metrics.probability_positive)
         self.assertIn("delta_unavailable", metrics.warnings)
         self.assertIsNone(metrics.scenario_1sigma)
+        self.assertIsNone(metrics.scenario_2sigma)
         self.assertIn("scenario_1sigma_unavailable", metrics.warnings)
+        self.assertIn("scenario_2sigma_unavailable", metrics.warnings)
+
+    def test_historical_volatility_and_rank_are_deterministic(self) -> None:
+        candles = sample_candles()
+
+        hv_20d = historical_volatility(candles, 20)
+        hv_60d = historical_volatility(candles, 60)
+        rank = historical_volatility_rank(candles, 20)
+
+        self.assertIsNotNone(hv_20d)
+        self.assertIsNotNone(hv_60d)
+        self.assertIsNotNone(rank)
+        self.assertGreater(hv_20d or 0, 0)
+        self.assertGreater(hv_60d or 0, 0)
+        self.assertGreaterEqual(rank or 0, 0)
+        self.assertLessEqual(rank or 1, 1)
+        self.assertIsNone(historical_volatility(candles[:10], 20))
+
+    def test_metrics_include_iv_hv_context_from_candles(self) -> None:
+        metrics = compute_metrics(
+            legs=[
+                leg(
+                    side="buy",
+                    option_type="call",
+                    strike=600,
+                    bid=4.90,
+                    ask=5.10,
+                    delta=0.4,
+                    theta=-0.05,
+                )
+            ],
+            playbook=PLAYBOOKS["long_call"],
+            underlying_price=610.0,
+            as_of=AS_OF,
+            atm_iv=0.18,
+            historical_candles=sample_candles(),
+        )
+
+        self.assertEqual(metrics.current_iv, 0.18)
+        self.assertIsNotNone(metrics.hv_20d)
+        self.assertIsNotNone(metrics.hv_60d)
+        self.assertIsNotNone(metrics.hv_rank)
+        self.assertIsNotNone(metrics.iv_hv_ratio)
+        self.assertEqual(
+            metrics.iv_hv_ratio,
+            round(0.18 / (metrics.hv_60d or 1), 4),
+        )
+        self.assertNotIn("hv_unavailable", metrics.warnings)
+        self.assertNotIn("iv_rank_unavailable", metrics.warnings)
 
     def test_non_executable_quote_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
