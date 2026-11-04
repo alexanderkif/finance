@@ -122,8 +122,10 @@ The dashboard opens on SPY and is organised top to bottom:
    prompts, an intent selector, and a deterministic analysis card appended
    inline for every answer so results stay comparable. Completed analyses show
    1-sigma and 2-sigma ranges, volatility context, and playbook event
-   sensitivity. User messages can be copied back into the input for editing,
-   Enter sends, and Shift+Enter inserts a new line.
+   sensitivity. `Use example` submits immediately, and user messages can be
+   copied back into the input for editing. Enter sends, and Shift+Enter inserts
+   a new line. The conversation height can be dragged by its corner grip or
+   adjusted with the keyboard and is remembered between visits.
 
 The UI supports light and dark themes; the theme and selected instrument are
 persisted in `localStorage`, and the stored theme is applied before hydration.

@@ -194,7 +194,9 @@ symbol, message, description, legs[], current_price, source, as_of
   price; fall back to the nearest executable strike below the price.
 - Pick the next lower executable put strike as the long leg.
 - `message` is a verbose sentence containing every parser field.
-  `description` explains the mechanics in plain language.
+  `description` explains the mechanics in plain language. The chat submits
+  `message` immediately instead of rendering `description` as a separate
+  assistant bubble.
 - Both are regenerated per request, so the expiration and strikes follow the
   live chain instead of a hardcoded sample.
 - Return `422` when the chain has no executable puts or no lower strike.
@@ -344,7 +346,9 @@ disclaimer: "Educational analysis, not investment advice."
 - Verify chart degradation for a missing key, a rate limit, a paid-plan
   restriction, and an unknown symbol.
 - Verify the example endpoint picks a future expiration, a near-money strike,
-  and the next lower strike, and returns a verbose message.
+  and the next lower strike, and returns a verbose message. Verify `Use example`
+  submits that message immediately and that the user can edit it from the
+  message's edit-in-input icon.
 - Mock CBOE 503 and verify the single retry, then a degraded response with no
   fabricated values.
 - Mock CBOE 429 with a fresh cache and verify no upstream call is made; with a
@@ -373,6 +377,8 @@ disclaimer: "Educational analysis, not investment advice."
   the 1-sigma and 2-sigma ranges, and the playbook event-sensitivity caption.
 - Verify a user message offers an edit-in-input button that copies its text back
   to the textarea, and that Enter sends while Shift+Enter inserts a new line.
+- Verify the chat log resizes by pointer drag and keyboard arrows, clamps to its
+  minimum and maximum, persists the height, and resets on double-click.
 - Verify degraded chart and news responses render an unavailable state instead
   of synthetic data.
 

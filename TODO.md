@@ -187,7 +187,11 @@ Update `CHANGELOG_LATEST.md` with each completed phase.
       calendar, with descriptive tooltips.
 - [x] Add an edit-in-input icon to user messages and send on Enter while
       keeping Shift+Enter for a new line.
-- Evidence on 2026-11-04: backend 97 tests pass; frontend 49 tests pass;
+- [x] Add a pointer- and keyboard-accessible chat resizer with a textarea-style
+      corner grip, clamped/persisted height, and double-click reset.
+- [x] Submit `Use example` immediately without a separate description bubble
+      and let the user edit it from the user message's edit-in-input icon.
+- Evidence on 2026-11-04: backend 97 tests pass; frontend 51 tests pass;
       production build succeeds.
 
 ## Volatility context [x]

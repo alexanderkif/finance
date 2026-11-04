@@ -14,7 +14,13 @@
   earnings, dividends, and macro.
 - User messages now have an edit-in-input icon that copies the message back to
   the textarea. Enter sends; Shift+Enter inserts a new line.
-- Backend: 97 tests pass; frontend: 49 tests pass; production build succeeds.
+- `Use example` now submits the generated example immediately without a
+  separate assistant description bubble; the user can edit it from the user
+  message's edit icon.
+- The chat log is vertically resizable with a corner grip like a textarea,
+  clamped between 240 and 960 pixels, persisted in `localStorage`, and reset on
+  double-click. The grip also supports pointer and keyboard resizing.
+- Backend: 97 tests pass; frontend: 51 tests pass; production build succeeds.
 
 ## Volatility context — 2026-11-04
 

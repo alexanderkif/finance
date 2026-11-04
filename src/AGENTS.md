@@ -116,6 +116,10 @@ change.
   `scenario_2sigma`. Label `hv_rank` as an HV percentile, not an IV rank.
 - Show playbook `event_flags` as event-sensitivity chips with a caption that
   says they are not a live event calendar.
+- `Use example` loads the live example and submits it immediately. Do not add a
+  separate assistant description bubble; the analysis card is the answer. The
+  user can then use the user-message edit icon to change it and send a new
+  request.
 - User messages offer an edit-in-input icon button that copies the message text
   back to the textarea. Enter sends; Shift+Enter inserts a new line.
 - The chat retries transient service failures, says which service is
@@ -127,6 +131,10 @@ change.
   resuming from the analysis step.
 - Auto-scroll the chat to the newest message only while the user is at the
   bottom. Stop after they scroll up and resume when they return to the bottom.
+- Make the chat log vertically resizable with a keyboard-accessible separator.
+  Clamp the height, persist it in `localStorage`, and reset to the default on
+  double-click. Keep the same auto-scroll pinned behavior when the height
+  changes.
 - Render only API data for candles, levels, and news. Show explicit
   unavailable and delayed-data states; never synthesize series.
 - Give the chart a text alternative: a keyboard-reachable data table or summary
