@@ -87,7 +87,10 @@ The legacy dashboard has been replaced. Follow [src/AGENTS.md](src/AGENTS.md).
 Analysis state contains intent, position, missing fields, playbook, market
 data, metrics, result, and detected language. Natural-language extraction uses
 Gemini structured output; schema validation, strategy classification, and all
-financial arithmetic remain deterministic in `api/core/metrics.py`. LLM calls
+financial arithmetic remain deterministic in `api/core/metrics.py`. Volatility
+context is deterministic too: `current_iv` comes from the CBOE chain, and HV,
+HV percentile, and IV/HV are computed from the chart candle providers. A true
+IV rank needs a historical IV series and stays `null` until one exists. LLM calls
 are limited to extraction and synthesis: one extraction call in
 `POST /api/analysis/parse` and at most one synthesis call in
 `POST /api/analysis/run`. The synthesis prompt receives computed facts and must

@@ -176,3 +176,52 @@ Update `CHANGELOG_LATEST.md` with each completed phase.
   symbol, and three-leg inputs, and assert that refusals expose no key or
   internal instruction text. Backend: 93 tests pass; frontend: 42 tests pass;
   production build succeeds.
+
+## Chat analysis cards [x]
+
+- [x] Extract the analysis card into an `AnalysisCard` component and append one
+      inline per successful answer instead of a "card updated" bubble.
+- [x] Add `scenario_2sigma` and show both 1-sigma and 2-sigma ranges.
+- [x] Return and display the selected intent as a card badge.
+- [x] Caption the playbook event chips as event sensitivity, not a live
+      calendar, with descriptive tooltips.
+- [x] Add an edit-in-input icon to user messages and send on Enter while
+      keeping Shift+Enter for a new line.
+- Evidence on 2026-11-04: backend 97 tests pass; frontend 49 tests pass;
+      production build succeeds.
+
+## Volatility context [x]
+
+- [x] Use the CBOE ATM option IV as `current_iv`.
+- [x] Compute `hv_20d` and `hv_60d` from daily candles supplied by CBOE index
+      history for XSP/VIX and Twelve Data for other symbols.
+- [x] Compute `hv_rank` as the current 20-day HV percentile over the trailing
+      year and `iv_hv_ratio` as current IV divided by 60-day HV.
+- [x] Keep `iv_rank` null because the free providers expose no historical IV
+      series; do not present HV percentile as IV rank.
+- [x] Show current IV, HV, HV percentile, and IV/HV in the analysis card, with
+      `hv_unavailable` degradation when candles are missing.
+- Evidence on 2026-11-04: live CBOE XSP history returned 260 candles with
+      HV 20d 11.37%, HV 60d 10.13%, and HV percentile 46.55%; Twelve Data SPY
+      returned 260 candles with HV 20d 13.25%, HV 60d 10.71%, and HV percentile
+      67.67%. Backend: 97 tests pass; frontend: 47 tests pass; production build
+      succeeds.
+
+## Chat resilience and error guidance [x]
+
+- [x] Retry transient Gemini failures and return user-facing quota/outage
+      messages instead of raw upstream status text.
+- [x] Retry transient chat failures in the Angular client and name the
+      unavailable service between attempts.
+- [x] Add a Cancel button and abort the previous request chain when a new
+      message is sent.
+- [x] Add a "Retry failed step" button that retries parsing when extraction
+      failed, or only the analysis step with the already parsed position when
+      analysis failed.
+- [x] Keep the chat at the parse step and prompt for missing leg fields in
+      plain language.
+- [x] Auto-scroll the chat while the user is at the bottom; pause when they
+      scroll up and resume at the bottom.
+- [x] Add backend retry tests and frontend cancel, retry-from-failed-step, and
+      auto-scroll tests. Evidence on 2026-11-04: backend 95 tests pass;
+      frontend 47 tests pass; production build succeeds.

@@ -106,10 +106,27 @@ change.
   level labels and value readouts with `formatPrice`: integers at or above
   100, up to two decimals below 100, and three significant digits below 1.
   Keep axis ticks and line markers sparse.
-- The chat announces that the analysis card was updated; do not repeat the
-  card's recommendation in a chat bubble.
-- The chat collects the intent (open, close, roll) separately from parsing and
-  prompts for missing leg fields before calling the analysis endpoint.
+- Append an `AnalysisCard` component inline for every successful answer instead
+  of a "card updated" bubble, so earlier analyses stay visible for comparison.
+  Do not repeat the card's recommendation in a separate chat bubble.
+- The chat collects the intent (open, close, roll) separately from parsing,
+  sends it to the API, and shows it as a badge on each analysis card.
+- The analysis card shows API volatility context (`current_iv`, `hv_20d`,
+  `hv_60d`, `hv_rank`, `iv_hv_ratio`) and both `scenario_1sigma` and
+  `scenario_2sigma`. Label `hv_rank` as an HV percentile, not an IV rank.
+- Show playbook `event_flags` as event-sensitivity chips with a caption that
+  says they are not a live event calendar.
+- User messages offer an edit-in-input icon button that copies the message text
+  back to the textarea. Enter sends; Shift+Enter inserts a new line.
+- The chat retries transient service failures, says which service is
+  unavailable between attempts, and offers a Cancel button. Sending a new
+  message cancels the previous request chain.
+- After a non-validation failure, offer "Retry failed step": retry parsing if
+  extraction failed, or only the analysis step with the already parsed position
+  if analysis failed. Do not resend the user message or repeat extraction when
+  resuming from the analysis step.
+- Auto-scroll the chat to the newest message only while the user is at the
+  bottom. Stop after they scroll up and resume when they return to the bottom.
 - Render only API data for candles, levels, and news. Show explicit
   unavailable and delayed-data states; never synthesize series.
 - Give the chart a text alternative: a keyboard-reachable data table or summary

@@ -119,7 +119,11 @@ The dashboard opens on SPY and is organised top to bottom:
    come from CBOE daily history and do not include volume, so the volume pane
    is hidden for those symbols with an explanatory note.
 3. The AI chat for describing an option position or spread, with missing-field
-   prompts, an intent selector, and a deterministic analysis card.
+   prompts, an intent selector, and a deterministic analysis card appended
+   inline for every answer so results stay comparable. Completed analyses show
+   1-sigma and 2-sigma ranges, volatility context, and playbook event
+   sensitivity. User messages can be copied back into the input for editing,
+   Enter sends, and Shift+Enter inserts a new line.
 
 The UI supports light and dark themes; the theme and selected instrument are
 persisted in `localStorage`, and the stored theme is applied before hydration.

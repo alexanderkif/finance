@@ -1,5 +1,66 @@
 # Phase log
 
+## Chat analysis cards — 2026-11-04
+
+- Extracted the analysis card into `AnalysisCard` and append it inline for every
+  successful answer, so multiple analyses remain visible and comparable in the
+  chat. Removed the "Analysis card updated" bubble.
+- Added `scenario_2sigma` alongside `scenario_1sigma` and display both ranges on
+  the card.
+- The selected `intent` is now returned by the API and shown as a badge on each
+  card; the dropdown remains in use rather than being decorative.
+- Playbook `event_flags` now render under an explicit "Playbook event
+  sensitivity (not a live calendar)" caption, with hover descriptions for
+  earnings, dividends, and macro.
+- User messages now have an edit-in-input icon that copies the message back to
+  the textarea. Enter sends; Shift+Enter inserts a new line.
+- Backend: 97 tests pass; frontend: 49 tests pass; production build succeeds.
+
+## Volatility context — 2026-11-04
+
+- Replaced the user-facing `iv_rank_unavailable` warning with deterministic
+  volatility context computed from existing free sources.
+- `current_iv` comes from the CBOE ATM option; `hv_20d` and `hv_60d` are
+  annualized historical volatility from daily closes (CBOE index history for
+  XSP/VIX, otherwise Twelve Data); `hv_rank` is the current 20-day HV
+  percentile over the trailing year; `iv_hv_ratio` compares current IV with
+  60-day HV.
+- A true IV rank still requires a historical IV series, which the free
+  providers do not expose, so `iv_rank` remains `null`. It is no longer shown
+  in the analysis card or sent to the synthesis model.
+- The analysis card now shows current IV, HV 20d, HV 60d, HV percentile, and
+  IV/HV. If candles are unavailable, those fields are `null` with an
+  `hv_unavailable` warning and analysis still returns.
+- Verified both live candle sources on 2026-11-04: CBOE XSP one-year history
+  returned 260 candles with HV 20d 11.37%, HV 60d 10.13%, HV percentile
+  46.55%; Twelve Data SPY returned 260 candles with HV 20d 13.25%, HV 60d
+  10.71%, HV percentile 67.67%. Backend: 97 tests pass; frontend: 47 tests
+  pass; production build succeeds.
+
+## Chat resilience — 2026-11-04
+
+- Gemini extraction and synthesis now retry transient network and `5xx`
+  failures twice with a short backoff. Persistent outages return a friendly
+  `502` instead of raw upstream status text; quota exhaustion keeps `429` with
+  wait-about-a-minute guidance.
+- CBOE rate-limit and outage responses in the analysis endpoints now use the
+  same user-facing retry guidance. Finnhub and Twelve Data retry a network
+  error or `5xx` once before degrading their dashboard sections.
+- The Angular chat retries `502`, `503`, `504`, and network failures, names the
+  unavailable service between attempts, and exposes a Cancel button. Sending a
+  new message aborts the previous request chain.
+- After a non-validation failure, the chat offers "Retry failed step". A parse
+  failure retries parsing before analysis; an analysis failure retries only the
+  analysis endpoint with the parsed position, without repeating the user
+  message or extraction.
+- Missing parse fields keep the chat at the parse step with a plain-language
+  prompt for each missing detail; `/api/analysis/run` is not called.
+- Chat auto-scroll follows new messages while the user is at the bottom, pauses
+  when they scroll up, and resumes at the bottom.
+- Added backend retry tests and frontend cancel, retry-from-failed-step, and
+  auto-scroll tests. Backend: 95 tests pass; frontend: 47 tests pass; production
+  build succeeds.
+
 ## Phase 4 — Dashboard and providers
 
 - Selected free, non-commercial providers: Twelve Data Basic for daily candles,

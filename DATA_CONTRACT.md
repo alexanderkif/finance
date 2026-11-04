@@ -104,6 +104,25 @@ unavailable, report `vix: null` with a warning.
 - If the provider is unconfigured, rate limited, or fails, return an empty
   `news` list with a warning. Do not block price, VIX, or chart data.
 
+## Analysis volatility context
+
+- `current_iv` comes from the CBOE chain: select the ATM IV for the position
+  expiration with the same strike-closest-to-spot rule used by the 1-sigma
+  scenario.
+- `hv_20d` and `hv_60d` are annualized standard deviations of daily log returns
+  over 20 and 60 trading days, using 252 trading days per year. Use the same
+  candle providers as the chart: CBOE index history for XSP/VIX, otherwise
+  Twelve Data.
+- `hv_rank` is the percentile of the current 20-day HV within its trailing
+  one-year rolling distribution.
+- `iv_hv_ratio` is current IV divided by 60-day HV, falling back to 20-day HV
+  when the longer window is unavailable.
+- Do not label HV percentile as IV rank. A true IV rank needs a historical IV
+  series, which the current free providers do not expose; keep `iv_rank` null.
+- If candles are unavailable, return null volatility fields and the
+  `hv_unavailable` warning. Never synthesize a candle series or an IV history.
+  Options analysis still proceeds.
+
 ## Degradation and missing values
 
 - Sections degrade independently: a news failure must not remove the quote,
@@ -114,6 +133,8 @@ unavailable, report `vix: null` with a warning.
 - On CBOE HTTP 5xx, retry once. If the retry fails, serve a cached chain less
   than ten minutes old with a `cached_data` warning; otherwise return
   `degraded: true` with `reason: "upstream_error"` and no contracts.
+- On a network error or HTTP 5xx from Finnhub or Twelve Data, retry the same
+  request once before degrading that section. Do not retry HTTP 429.
 - Never fabricate values. Represent unavailable fields as `null` or `[]` and
   include a warning.
 - Preserve source attribution and the real data timestamp when serving cached

@@ -21,6 +21,29 @@ Unavailable values are explicit; see [DATA_CONTRACT.md](DATA_CONTRACT.md).
 - All keys are server-side only. Local development reads them from the
   repository-root `.env.local`; production reads deployment environment
   settings.
+
+## Transient failures and user-facing errors
+
+- Gemini requests retry transient failures (network errors and HTTP
+  `408`, `425`, `500`, `502`, `503`, `504`) twice with a short backoff. HTTP
+  `429` is not retried.
+- An exhausted free-tier quota returns `429` with a message to wait about a
+  minute. A Gemini outage that persists through retries returns `502` with a
+  "temporarily unavailable" message.
+- CBOE rate limits and outages return `429` and `502` with retry guidance
+  instead of raw upstream status text.
+- The Angular chat retries `502`, `503`, `504`, and network (`0`) responses up
+  to two more times, names the unavailable service between attempts, and offers
+  a Cancel button. Sending a new message cancels the previous request chain.
+- After a non-validation failure, the chat offers "Retry failed step". A parse
+  failure retries parsing and then analysis; an analysis failure retries only
+  the analysis step with the already parsed position, without re-sending the
+  message or calling Gemini extraction again.
+- Missing parse fields keep the chat at the parse step and ask only for the
+  missing details; `/api/analysis/run` is not called.
+- The chat scrolls to the newest message while the user is at the bottom. It
+  stops auto-scrolling after the user scrolls up and resumes when they return
+  to the bottom.
 - Free tiers are used for non-commercial development. Do not launch
   commercially without licensed plans.
 
@@ -224,10 +247,11 @@ Request:
 Response `AnalysisResult`:
 
 ```text
-strategy_key, header, recommendation, probability_positive, max_profit,
-max_loss, net_credit_debit, breakeven, theta_daily, iv_rank, event_flags,
-liquidity, scenario_1sigma, detected_language, disclaimer, source, as_of,
-degraded, warnings[]
+strategy_key, intent, header, recommendation, probability_positive, max_profit,
+max_loss, net_credit_debit, breakeven, theta_daily, iv_rank, current_iv,
+hv_20d, hv_60d, hv_rank, iv_hv_ratio, event_flags, liquidity, scenario_1sigma,
+scenario_2sigma, detected_language, disclaimer, source, as_of, degraded,
+warnings[]
 ```
 
 Conventions:
@@ -241,15 +265,32 @@ Conventions:
   the absolute delta of the deciding short leg for credit structures.
 - `theta_daily` is the position theta for one contract per leg, built from
   CBOE's per-share theta.
-- `iv_rank` is `null` with an `iv_rank_unavailable` warning until a historical
-  IV source exists.
-- `event_flags` lists the playbook's sensitive events (`earnings`, `dividends`,
-  `macro`). It is not an event calendar.
+- `iv_rank` stays `null` until a historical IV series is available; it is never
+  estimated from HV or presented as a true IV rank.
+- `current_iv` is the ATM implied volatility selected from the CBOE chain for
+  the position expiration.
+- `hv_20d` and `hv_60d` are annualized historical volatility from daily log
+  returns over 20 and 60 trading days (252 trading days per year). Candles come
+  from CBOE index history for XSP/VIX and from Twelve Data otherwise.
+- `hv_rank` is the percentile of the current 20-day HV within its trailing
+  one-year rolling distribution.
+- `iv_hv_ratio` is `current_iv / hv_60d`, falling back to `hv_20d` when the
+  60-day window is unavailable.
+- If candles are unavailable, the volatility fields are `null` and the response
+  includes an `hv_unavailable` warning; options analysis still returns.
+- `intent` echoes the requested `open`, `close`, or `roll` intent. It shapes the
+  written assessment and is shown on every analysis card so results can be
+  compared.
+- `event_flags` lists the playbook's own event sensitivity (`earnings`,
+  `dividends`, `macro`). It describes which event types the strategy is exposed
+  to; it is not a live event calendar and does not claim an event is scheduled.
 - `liquidity` reports the worst-leg bid/ask spread percent, the minimum open
   interest and volume across legs, and a `good`/`fair`/`poor`/`unknown` rating.
 - `scenario_1sigma` is the expected move over the option's days to expiration:
   `underlying_price * atm_iv * sqrt(days_to_expiration / 365)`, where `atm_iv`
   is selected from the chain at the strike closest to the underlying price.
+- `scenario_2sigma` uses the same formula multiplied by two, giving the wider
+  two-standard-deviation range.
 - `header` is deterministic and ordered short leg / long leg:
   `Bull Put Spread XSP 732/729 2030-11-15`. A single-leg header is
   `Long Call SPY 600 2030-11-15`.
@@ -280,13 +321,17 @@ disclaimer: "Educational analysis, not investment advice."
 - Test maximum loss for a credit spread and probability calculation from
   delta.
 - Run analysis against a mocked chain and mocked Gemini, and assert the header,
-  credit/debit metrics, breakeven, probability, theta, liquidity, 1-sigma
-  scenario, event flags, disclaimer, and answer language.
+  credit/debit metrics, breakeven, probability, theta, liquidity, 1-sigma and
+  2-sigma scenarios, event flags, intent, disclaimer, and answer language.
 - Assert that `run` makes exactly one Gemini synthesis call and passes the
   computed metrics as facts.
 - Assert `422` for a missing contract and for legs that do not form a supported
   spread, `429` for Gemini quota exhaustion, and `502` for a CBOE outage.
-- Assert `iv_rank` is `null` with an `iv_rank_unavailable` warning.
+- Assert a transient Gemini `503` is retried, and a persistent outage returns a
+  friendly `502` after the retry budget is spent.
+- Assert `iv_rank` is `null`, and that `current_iv`, `hv_20d`, `hv_60d`,
+  `hv_rank`, and `iv_hv_ratio` are populated from mocked candles. Assert an
+  `hv_unavailable` warning when candles are not configured.
 - Mock CBOE 200 and verify the normalized chain, `source`, and `as_of`.
 - Mock CBOE quote, `_VIX`, and Finnhub news; verify the combined market
   response, per-section sources and timestamps, and the general-news fallback.
@@ -317,6 +362,17 @@ disclaimer: "Educational analysis, not investment advice."
   trend line and an indicator, and the news headline links.
 - Verify the AI chat is rendered directly below the market grid and chart, and
   prompts for missing fields before analysis.
+- Verify Cancel aborts the active request, a new message cancels the previous
+  request, and auto-scroll pauses while the user is reading older messages and
+  resumes at the bottom.
+- Verify "Retry failed step" repeats parsing after an extraction failure and
+  repeats only the analysis call after an analysis failure, without re-sending
+  the user message or repeating extraction.
+- Verify every successful answer appends its analysis card inline in the chat,
+  so multiple cards remain comparable, and that the card shows the intent badge,
+  the 1-sigma and 2-sigma ranges, and the playbook event-sensitivity caption.
+- Verify a user message offers an edit-in-input button that copies its text back
+  to the textarea, and that Enter sends while Shift+Enter inserts a new line.
 - Verify degraded chart and news responses render an unavailable state instead
   of synthetic data.
 
