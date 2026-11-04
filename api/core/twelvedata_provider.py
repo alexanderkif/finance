@@ -1,3 +1,4 @@
+import asyncio
 import time
 from datetime import UTC, datetime
 from typing import Final
@@ -9,6 +10,7 @@ from settings import require_twelve_data_api_key
 
 TWELVE_DATA_URL: Final = "https://api.twelvedata.com/time_series"
 TWELVE_DATA_CACHE_TTL_SECONDS: Final = 60.0
+TWELVE_DATA_RETRY_DELAY_SECONDS: Final = 0.25
 
 
 class TwelveDataError(RuntimeError):
@@ -89,22 +91,35 @@ class TwelveDataProvider:
         except RuntimeError as error:
             raise TwelveDataConfigurationError(str(error)) from error
 
-        try:
-            response = await self._client.get(
-                TWELVE_DATA_URL,
-                params={
-                    "symbol": normalized_symbol,
-                    "interval": "1day",
-                    "outputsize": str(output_size),
-                    "format": "JSON",
-                },
-                headers={"Authorization": f"apikey {api_key}"},
-                timeout=20.0,
-            )
-        except httpx.RequestError as error:
-            raise TwelveDataRequestError(
-                "The candle provider could not be reached."
-            ) from error
+        attempts = 2
+        response: httpx.Response | None = None
+        for attempt in range(attempts):
+            try:
+                response = await self._client.get(
+                    TWELVE_DATA_URL,
+                    params={
+                        "symbol": normalized_symbol,
+                        "interval": "1day",
+                        "outputsize": str(output_size),
+                        "format": "JSON",
+                    },
+                    headers={"Authorization": f"apikey {api_key}"},
+                    timeout=20.0,
+                )
+            except httpx.RequestError as error:
+                if attempt < attempts - 1:
+                    await asyncio.sleep(TWELVE_DATA_RETRY_DELAY_SECONDS)
+                    continue
+                raise TwelveDataRequestError(
+                    "The candle provider could not be reached."
+                ) from error
+            if 500 <= response.status_code < 600 and attempt < attempts - 1:
+                await asyncio.sleep(TWELVE_DATA_RETRY_DELAY_SECONDS)
+                continue
+            break
+
+        if response is None:
+            raise TwelveDataRequestError("The candle provider did not respond.")
 
         try:
             data = response.json()

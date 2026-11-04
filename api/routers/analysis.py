@@ -41,6 +41,17 @@ _SINGLE_KEYS: dict[tuple[str, str], PlaybookKey] = {
     ("sell", "put"): "short_put",
 }
 _FIELD_ORDER = ("side", "option_type", "strike", "expiration")
+_CBOE_RATE_LIMIT_DETAIL = (
+    "The CBOE delayed-quote service is rate limited. "
+    "Wait about a minute, then try again."
+)
+_CBOE_UNAVAILABLE_DETAIL = (
+    "CBOE market data is temporarily unavailable. "
+    "Please try again in about a minute."
+)
+_CBOE_UNREACHABLE_DETAIL = (
+    "CBOE market data could not be reached. Check the connection and try again."
+)
 
 
 class ParseRequest(BaseModel):
@@ -288,20 +299,18 @@ async def run_analysis_endpoint(
     except GeminiResponseError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     except CboeRateLimitedError as error:
-        raise HTTPException(status_code=429, detail=str(error)) from error
+        raise HTTPException(status_code=429, detail=_CBOE_RATE_LIMIT_DETAIL) from error
     except CboeUnavailableError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
+        raise HTTPException(status_code=502, detail=_CBOE_UNAVAILABLE_DETAIL) from error
     except httpx.HTTPStatusError as error:
-        status_code = 404 if error.response.status_code == 404 else 502
-        raise HTTPException(
-            status_code=status_code,
-            detail=f"CBOE market provider returned HTTP {error.response.status_code}.",
-        ) from error
+        if error.response.status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail="No CBOE market data was found for this symbol.",
+            ) from error
+        raise HTTPException(status_code=502, detail=_CBOE_UNAVAILABLE_DETAIL) from error
     except httpx.RequestError as error:
-        raise HTTPException(
-            status_code=502,
-            detail="CBOE market data could not be reached.",
-        ) from error
+        raise HTTPException(status_code=502, detail=_CBOE_UNREACHABLE_DETAIL) from error
     except CboePayloadError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     except ValueError as error:
@@ -322,20 +331,18 @@ async def get_analysis_example(
         chain = await provider.get_chain(symbol)
         quote = await provider.get_market_quote(symbol)
     except CboeRateLimitedError as error:
-        raise HTTPException(status_code=429, detail=str(error)) from error
+        raise HTTPException(status_code=429, detail=_CBOE_RATE_LIMIT_DETAIL) from error
     except CboeUnavailableError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
+        raise HTTPException(status_code=502, detail=_CBOE_UNAVAILABLE_DETAIL) from error
     except httpx.HTTPStatusError as error:
-        status_code = 404 if error.response.status_code == 404 else 502
-        raise HTTPException(
-            status_code=status_code,
-            detail=f"CBOE market provider returned HTTP {error.response.status_code}.",
-        ) from error
+        if error.response.status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail="No CBOE market data was found for this symbol.",
+            ) from error
+        raise HTTPException(status_code=502, detail=_CBOE_UNAVAILABLE_DETAIL) from error
     except httpx.RequestError as error:
-        raise HTTPException(
-            status_code=502,
-            detail="CBOE market data could not be reached.",
-        ) from error
+        raise HTTPException(status_code=502, detail=_CBOE_UNREACHABLE_DETAIL) from error
     except CboePayloadError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
     except ValueError as error:

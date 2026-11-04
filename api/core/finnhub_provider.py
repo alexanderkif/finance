@@ -1,3 +1,4 @@
+import asyncio
 import time
 from datetime import UTC, date, datetime, timedelta
 from typing import Final
@@ -9,6 +10,7 @@ from settings import require_finnhub_api_key
 FINNHUB_BASE_URL: Final = "https://finnhub.io/api/v1"
 FINNHUB_CACHE_TTL_SECONDS: Final = 300.0
 FINNHUB_NEWS_WINDOW_DAYS: Final = 7
+FINNHUB_RETRY_DELAY_SECONDS: Final = 0.25
 
 
 class FinnhubError(RuntimeError):
@@ -98,18 +100,30 @@ class FinnhubProvider:
         params: dict[str, str],
         headers: dict[str, str],
     ) -> list[object]:
-        try:
-            response = await self._client.get(
-                f"{FINNHUB_BASE_URL}/{path}",
-                params=params,
-                headers=headers,
-                timeout=15.0,
-            )
-        except httpx.RequestError as error:
-            raise FinnhubRequestError(
-                "The news provider could not be reached."
-            ) from error
+        attempts = 2
+        response: httpx.Response | None = None
+        for attempt in range(attempts):
+            try:
+                response = await self._client.get(
+                    f"{FINNHUB_BASE_URL}/{path}",
+                    params=params,
+                    headers=headers,
+                    timeout=15.0,
+                )
+            except httpx.RequestError as error:
+                if attempt < attempts - 1:
+                    await asyncio.sleep(FINNHUB_RETRY_DELAY_SECONDS)
+                    continue
+                raise FinnhubRequestError(
+                    "The news provider could not be reached."
+                ) from error
+            if 500 <= response.status_code < 600 and attempt < attempts - 1:
+                await asyncio.sleep(FINNHUB_RETRY_DELAY_SECONDS)
+                continue
+            break
 
+        if response is None:
+            raise FinnhubRequestError("The news provider did not respond.")
         if response.status_code == 429:
             raise FinnhubRateLimitError("The news provider rate limit was reached.")
         if response.status_code in (401, 403):

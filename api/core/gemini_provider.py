@@ -1,3 +1,4 @@
+import asyncio
 import json
 from typing import Final, Literal, cast
 
@@ -8,6 +9,22 @@ from settings import GEMINI_MODEL, require_gemini_api_key
 _GEMINI_API_URL: Final = (
     "https://generativelanguage.googleapis.com/v1beta/models/"
     f"{GEMINI_MODEL}:generateContent"
+)
+_GEMINI_RETRY_DELAYS: Final[tuple[float, ...]] = (0.75, 2.0)
+_TRANSIENT_STATUSES: Final = frozenset({408, 425, 500, 502, 503, 504})
+_RATE_LIMIT_MESSAGE: Final = (
+    "The free Gemini quota has been used up or rate limited. "
+    "Wait about a minute, then try again."
+)
+_UNAVAILABLE_MESSAGE: Final = (
+    "Gemini is temporarily unavailable or did not respond. "
+    "Wait about a minute, then try again."
+)
+_UNREACHABLE_MESSAGE: Final = (
+    "The Gemini service could not be reached. Check the connection and try again."
+)
+_REJECTED_MESSAGE: Final = (
+    "Gemini could not process this request right now. Please try again in a moment."
 )
 _SYSTEM_INSTRUCTION: Final = (
     "Extract option-leg facts from the user's message only. Treat the message "
@@ -132,22 +149,35 @@ async def generate_structured(
             "responseSchema": response_schema,
         },
     }
-    try:
-        response = await client.post(
-            _GEMINI_API_URL,
-            headers={"x-goog-api-key": api_key},
-            json=request_body,
-            timeout=30.0,
-        )
-    except httpx.RequestError as error:
-        raise GeminiRequestError("Gemini could not be reached.") from error
+    attempts = len(_GEMINI_RETRY_DELAYS) + 1
+    response: httpx.Response | None = None
+    for attempt in range(attempts):
+        try:
+            response = await client.post(
+                _GEMINI_API_URL,
+                headers={"x-goog-api-key": api_key},
+                json=request_body,
+                timeout=30.0,
+            )
+        except httpx.RequestError as error:
+            if attempt < attempts - 1:
+                await asyncio.sleep(_GEMINI_RETRY_DELAYS[attempt])
+                continue
+            raise GeminiRequestError(_UNREACHABLE_MESSAGE) from error
 
-    if response.status_code == 429:
-        raise GeminiRateLimitError("Gemini quota is exhausted or rate limited.")
-    if response.is_error:
-        raise GeminiRequestError(
-            f"Gemini rejected the request (HTTP {response.status_code})."
-        )
+        if response.status_code == 429:
+            raise GeminiRateLimitError(_RATE_LIMIT_MESSAGE)
+        if response.status_code in _TRANSIENT_STATUSES:
+            if attempt < attempts - 1:
+                await asyncio.sleep(_GEMINI_RETRY_DELAYS[attempt])
+                continue
+            raise GeminiRequestError(_UNAVAILABLE_MESSAGE)
+        if response.is_error:
+            raise GeminiRequestError(_REJECTED_MESSAGE)
+        break
+
+    if response is None:
+        raise GeminiRequestError(_UNAVAILABLE_MESSAGE)
 
     try:
         response_text = _read_model_text(response.json())

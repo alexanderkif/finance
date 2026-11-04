@@ -25,6 +25,7 @@ class AnalysisParseApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.model_result = extracted_position([])
         self.upstream_status = 200
+        self.upstream_status_sequence: list[int] = []
         self.requests: list[httpx.Request] = []
         self.environment = patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"})
         self.environment.start()
@@ -44,8 +45,13 @@ class AnalysisParseApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def gemini_response(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
-        if self.upstream_status != 200:
-            return httpx.Response(self.upstream_status, json={"error": "redacted"})
+        status = (
+            self.upstream_status_sequence.pop(0)
+            if self.upstream_status_sequence
+            else self.upstream_status
+        )
+        if status != 200:
+            return httpx.Response(status, json={"error": "redacted"})
         response_text = json.dumps(self.model_result)
         return httpx.Response(
             200,
@@ -200,7 +206,46 @@ class AnalysisParseApiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 429)
         self.assertIn("quota", response.json()["detail"])
+        self.assertIn("wait about a minute", response.json()["detail"].lower())
+        self.assertEqual(len(self.requests), 1)
         self.assertNotIn("redacted", response.text)
+
+    async def test_retries_a_transient_gemini_outage(self) -> None:
+        self.model_result = extracted_position(
+            [
+                {
+                    "symbol": "SPY",
+                    "side": "buy",
+                    "option_type": "call",
+                    "strike": 600,
+                    "expiration": "2030-11-15",
+                }
+            ]
+        )
+        self.upstream_status_sequence = [503, 503]
+
+        with patch("core.gemini_provider._GEMINI_RETRY_DELAYS", (0.0, 0.0)):
+            response = await self.api_client.post(
+                "/api/analysis/parse",
+                json={"message": "buy call SPY 600 2030-11-15"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(self.requests), 3)
+
+    async def test_reports_gemini_outage_after_retries(self) -> None:
+        self.upstream_status = 503
+
+        with patch("core.gemini_provider._GEMINI_RETRY_DELAYS", (0.0, 0.0)):
+            response = await self.api_client.post(
+                "/api/analysis/parse",
+                json={"message": "buy call SPY 600"},
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("temporarily unavailable", response.json()["detail"])
+        self.assertIn("Wait about a minute", response.json()["detail"])
+        self.assertEqual(len(self.requests), 3)
 
     async def test_rejects_strategies_with_more_than_two_legs(self) -> None:
         self.model_result = extracted_position(
