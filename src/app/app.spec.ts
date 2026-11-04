@@ -214,7 +214,7 @@ describe('App', () => {
     expect(localStorage.getItem('osa.theme')).toBe('dark');
   });
 
-  it('loads a dynamic and readable example into the chat', async () => {
+  it('loads an example and submits it immediately', async () => {
     const { fixture, compiled } = await renderDashboard();
     const button = Array.from(
       compiled.querySelectorAll<HTMLButtonElement>('.chat-header button'),
@@ -223,11 +223,16 @@ describe('App', () => {
     expect(button).toBeDefined();
     button!.click();
     await fixture.whenStable();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     fixture.detectChanges();
 
-    const textarea = compiled.querySelector<HTMLTextAreaElement>('.chat-form textarea');
-    expect(textarea?.value).toContain('defined-risk bull put spread');
-    expect(textarea?.value).toContain('2030-11-15');
-    expect(textarea?.value).not.toContain('732');
+    const userMessages = compiled.querySelectorAll('.message-user');
+    const userMessage = userMessages.item(userMessages.length - 1);
+    expect(userMessage.textContent).toContain('defined-risk bull put spread');
+    expect(userMessage.textContent).toContain('2030-11-15');
+    expect(userMessage.textContent).not.toContain('732');
+    expect(compiled.querySelector<HTMLTextAreaElement>('.chat-form textarea')?.value).toBe('');
+    expect(compiled.querySelector('.analysis-card')).not.toBeNull();
+    expect(compiled.querySelector('.chat-log')?.textContent).not.toContain('caps the loss');
   });
 });

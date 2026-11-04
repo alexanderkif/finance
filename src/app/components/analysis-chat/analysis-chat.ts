@@ -253,6 +253,9 @@ export class AnalysisChat {
     if (this.exampleBusy()) {
       return;
     }
+    this.activeRequest?.abort();
+    this.activeRequest = null;
+    this.busy.set(false);
     const controller = new AbortController();
     this.exampleRequest?.abort();
     this.exampleRequest = controller;
@@ -270,10 +273,7 @@ export class AnalysisChat {
         return;
       }
       this.draft.set(example.message);
-      this.messages.update((messages) => [
-        ...messages,
-        { role: 'assistant', text: example.description },
-      ]);
+      await this.send();
     } catch (error) {
       if (!controller.signal.aborted && !isAbortError(error)) {
         this.error.set(this.errorMessage(error));
