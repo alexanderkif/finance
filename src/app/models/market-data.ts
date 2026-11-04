@@ -126,6 +126,7 @@ export interface Scenario {
 
 export interface AnalysisResult {
   strategy_key: string;
+  intent: Intent;
   header: string;
   recommendation: string;
   probability_positive: number | null;
@@ -135,9 +136,15 @@ export interface AnalysisResult {
   breakeven: number | null;
   theta_daily: number | null;
   iv_rank: number | null;
+  current_iv: number | null;
+  hv_20d: number | null;
+  hv_60d: number | null;
+  hv_rank: number | null;
+  iv_hv_ratio: number | null;
   event_flags: string[];
   liquidity: Liquidity;
   scenario_1sigma: Scenario | null;
+  scenario_2sigma: Scenario | null;
   detected_language: string;
   disclaimer: string;
   source: 'cboe_delayed';

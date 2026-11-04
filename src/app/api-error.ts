@@ -18,6 +18,18 @@ export function errorMessage(error: unknown): string {
   return 'Please try again in a moment.';
 }
 
+export function isRetryable(error: unknown): boolean {
+  return (
+    error instanceof HttpErrorResponse &&
+    (error.status === 0 ||
+      error.status === 408 ||
+      error.status === 425 ||
+      error.status === 502 ||
+      error.status === 503 ||
+      error.status === 504)
+  );
+}
+
 function readDetail(body: unknown): string | null {
   if (typeof body === 'string' && body.trim().length > 0) {
     return body;
@@ -39,5 +51,18 @@ function readDetail(body: unknown): string | null {
 }
 
 function fallbackMessage(status: number): string {
-  return status === 0 ? 'The API could not be reached.' : `Request failed (${status})`;
+  switch (status) {
+    case 0:
+      return 'The analysis service could not be reached. Check the connection and try again.';
+    case 429:
+      return 'The free-tier service limit has been reached. Wait about a minute, then try again.';
+    case 422:
+      return 'The request could not be processed. Check the position details and try again.';
+    case 502:
+    case 503:
+    case 504:
+      return 'A market-data or AI service is temporarily unavailable. Please try again in about a minute.';
+    default:
+      return `The request failed (${status}). Please try again in a moment.`;
+  }
 }

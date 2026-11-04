@@ -8,6 +8,7 @@ import { ChartRange, ChartResponse, MarketResponse, NewsHeadline } from './model
 import { formatPrice } from './price-format';
 import { Preferences } from './services/preferences';
 import { chartPalette } from './theme-palette';
+import { warningLabel } from './warning-labels';
 
 @Component({
   selector: 'app-root',
@@ -128,6 +129,7 @@ export class App {
   );
 
   protected readonly errorMessage = errorMessage;
+  protected readonly warningLabel = warningLabel;
 
   constructor() {
     afterNextRender(() => {
@@ -171,39 +173,6 @@ export class App {
   protected reload(): void {
     this.chart.reload();
     this.market.reload();
-  }
-
-  protected warningLabel(code: string): string {
-    switch (code) {
-      case 'volume_unavailable':
-        return 'Volume is unavailable for this symbol.';
-      case 'symbol_requires_paid_plan':
-        return 'Candles for this symbol require a paid Twelve Data plan.';
-      case 'candles_provider_not_configured':
-        return 'The candle provider is not configured.';
-      case 'candles_rate_limited':
-        return 'The candle provider is rate limited.';
-      case 'candles_unavailable':
-        return 'Candles are temporarily unavailable.';
-      case 'quote_unavailable':
-        return 'The quote is unavailable.';
-      case 'price_unavailable':
-        return 'The price is unavailable.';
-      case 'change_pct_unavailable':
-        return 'The price change is unavailable.';
-      case 'vix_unavailable':
-        return 'VIX is unavailable.';
-      case 'news_provider_not_configured':
-        return 'The news provider is not configured.';
-      case 'news_rate_limited':
-        return 'The news provider is rate limited.';
-      case 'news_unavailable':
-        return 'News is temporarily unavailable.';
-      case 'iv_rank_unavailable':
-        return 'IV rank is unavailable.';
-      default:
-        return code;
-    }
   }
 
   protected formatLevel(value: number): string {

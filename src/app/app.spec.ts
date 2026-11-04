@@ -44,6 +44,7 @@ const marketStub: MarketResponse = {
 
 const analysisStub: AnalysisResult = {
   strategy_key: 'bull_put_spread',
+  intent: 'open',
   header: 'Bull Put Spread XSP 732/729 2030-11-15',
   recommendation: 'This spread profits if the underlying stays above 731.79.',
   probability_positive: 0.7,
@@ -53,6 +54,11 @@ const analysisStub: AnalysisResult = {
   breakeven: 730.5,
   theta_daily: 5,
   iv_rank: null,
+  current_iv: 0.14,
+  hv_20d: 0.12,
+  hv_60d: 0.13,
+  hv_rank: 0.42,
+  iv_hv_ratio: 1.08,
   event_flags: ['earnings'],
   liquidity: {
     bid_ask_spread_pct: 12.5,
@@ -61,6 +67,7 @@ const analysisStub: AnalysisResult = {
     rating: 'fair',
   },
   scenario_1sigma: null,
+  scenario_2sigma: null,
   detected_language: 'English',
   disclaimer: 'Educational analysis, not investment advice.',
   source: 'cboe_delayed',

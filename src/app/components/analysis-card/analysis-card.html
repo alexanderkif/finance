@@ -1,0 +1,166 @@
+<article class="analysis-card" aria-label="Analysis result">
+  <header class="analysis-head">
+    <h3>{{ result().header }}</h3>
+    <span class="intent-badge">{{ result().intent }}</span>
+  </header>
+  <p class="analysis-summary">{{ result().recommendation }}</p>
+
+  <dl class="metric-grid">
+    <div>
+      <dt>Probability of profit</dt>
+      <dd>
+        @if (result().probability_positive !== null) {
+          {{ result().probability_positive | percent: '1.0-1' }}
+        } @else {
+          —
+        }
+      </dd>
+    </div>
+    <div>
+      <dt>
+        {{ result().net_credit_debit >= 0 ? 'Net credit' : 'Net debit' }}
+      </dt>
+      <dd>
+        {{
+          (result().net_credit_debit >= 0 ? result().net_credit_debit : -result().net_credit_debit)
+            | currency: 'USD' : 'symbol' : '1.0-0'
+        }}
+      </dd>
+    </div>
+    <div>
+      <dt>Max profit</dt>
+      <dd>
+        @if (result().max_profit !== null) {
+          {{ result().max_profit | currency: 'USD' : 'symbol' : '1.0-0' }}
+        } @else {
+          Unbounded
+        }
+      </dd>
+    </div>
+    <div>
+      <dt>Max loss</dt>
+      <dd>
+        @if (result().max_loss !== null) {
+          {{ result().max_loss | currency: 'USD' : 'symbol' : '1.0-0' }}
+        } @else {
+          Unbounded
+        }
+      </dd>
+    </div>
+    <div>
+      <dt>Breakeven</dt>
+      <dd>
+        @if (result().breakeven !== null) {
+          {{ result().breakeven | number: '1.2-2' }}
+        } @else {
+          —
+        }
+      </dd>
+    </div>
+    <div>
+      <dt>Theta / day</dt>
+      <dd>
+        @if (result().theta_daily !== null) {
+          {{ result().theta_daily | currency: 'USD' : 'symbol' : '1.2-2' }}
+        } @else {
+          —
+        }
+      </dd>
+    </div>
+    <div>
+      <dt>Current IV</dt>
+      <dd>
+        @if (result().current_iv !== null) {
+          {{ result().current_iv | percent: '1.0-1' }}
+        } @else {
+          —
+        }
+      </dd>
+    </div>
+    <div>
+      <dt>HV 20d</dt>
+      <dd>
+        @if (result().hv_20d !== null) {
+          {{ result().hv_20d | percent: '1.0-1' }}
+        } @else {
+          —
+        }
+      </dd>
+    </div>
+    <div>
+      <dt>HV 60d</dt>
+      <dd>
+        @if (result().hv_60d !== null) {
+          {{ result().hv_60d | percent: '1.0-1' }}
+        } @else {
+          —
+        }
+      </dd>
+    </div>
+    <div>
+      <dt>HV 20d percentile (1y)</dt>
+      <dd>
+        @if (result().hv_rank !== null) {
+          {{ result().hv_rank | percent: '1.0-0' }}
+        } @else {
+          —
+        }
+      </dd>
+    </div>
+    <div>
+      <dt>IV / HV</dt>
+      <dd>
+        @if (result().iv_hv_ratio !== null) {
+          {{ result().iv_hv_ratio | number: '1.2-2' }}×
+        } @else {
+          —
+        }
+      </dd>
+    </div>
+    <div>
+      <dt>Liquidity</dt>
+      <dd>
+        {{ result().liquidity.rating }}
+        @if (result().liquidity.bid_ask_spread_pct !== null) {
+          ({{ result().liquidity.bid_ask_spread_pct | number: '1.0-1' }}%)
+        }
+      </dd>
+    </div>
+  </dl>
+
+  @if (result().scenario_1sigma; as scenario) {
+    <p class="scenario">
+      1σ over {{ scenario.days_to_expiration }} days: {{ scenario.low | number: '1.2-2' }} –
+      {{ scenario.high | number: '1.2-2' }}
+      (ATM IV {{ scenario.atm_iv | percent: '1.0-1' }})
+    </p>
+  }
+  @if (result().scenario_2sigma; as scenario) {
+    <p class="scenario">
+      2σ over {{ scenario.days_to_expiration }} days: {{ scenario.low | number: '1.2-2' }} –
+      {{ scenario.high | number: '1.2-2' }}
+      (ATM IV {{ scenario.atm_iv | percent: '1.0-1' }})
+    </p>
+  }
+
+  @if (result().event_flags.length > 0) {
+    <div class="event-sensitivity">
+      <span class="event-caption"> Playbook event sensitivity (not a live calendar): </span>
+      <ul class="chips" aria-label="Playbook event sensitivity">
+        @for (flag of result().event_flags; track flag) {
+          <li [title]="eventFlagDescription(flag)">{{ flag }}</li>
+        }
+      </ul>
+    </div>
+  }
+
+  @if (result().warnings.length > 0) {
+    <ul class="warnings" aria-label="Data warnings">
+      @for (warning of result().warnings; track warning) {
+        <li>{{ warningLabel(warning) }}</li>
+      }
+    </ul>
+  }
+
+  <p class="disclaimer">{{ result().disclaimer }}</p>
+</article>
