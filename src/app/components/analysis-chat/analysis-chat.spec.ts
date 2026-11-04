@@ -102,6 +102,7 @@ describe('AnalysisChat', () => {
     parse: ReturnType<typeof vi.fn>;
     runAnalysis: ReturnType<typeof vi.fn>;
   }> {
+    localStorage.clear();
     const parse = vi.fn((_message: string, _symbol: string, signal?: AbortSignal) =>
       pendingUntilAborted(signal),
     );
@@ -278,6 +279,27 @@ describe('AnalysisChat', () => {
     expect(parse.mock.calls[0]?.[0]).toBe(parse.mock.calls[1]?.[0]);
     expect(runAnalysis).toHaveBeenCalledTimes(1);
     expect(compiled.querySelectorAll('.message-user')).toHaveLength(1);
+  });
+
+  it('resizes the conversation with the keyboard and persists the height', async () => {
+    const { fixture, compiled } = await setup();
+    const resizer = compiled.querySelector<HTMLElement>('.chat-resizer');
+    expect(resizer).not.toBeNull();
+    expect(resizer!.getAttribute('aria-valuenow')).toBe('640');
+
+    resizer!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true }),
+    );
+    fixture.detectChanges();
+
+    expect(resizer!.getAttribute('aria-valuenow')).toBe('664');
+    expect(localStorage.getItem('osa.chat.height')).toBe('664');
+
+    resizer!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+    fixture.detectChanges();
+
+    expect(resizer!.getAttribute('aria-valuenow')).toBe('640');
+    expect(localStorage.getItem('osa.chat.height')).toBe('640');
   });
 
   it('keeps the latest message in view unless the user scrolled away', async () => {

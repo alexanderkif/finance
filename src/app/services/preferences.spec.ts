@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { Preferences } from './preferences';
+import {
+  DEFAULT_CHAT_HEIGHT_PX,
+  MAX_CHAT_HEIGHT_PX,
+  MIN_CHAT_HEIGHT_PX,
+  Preferences,
+} from './preferences';
 
 describe('Preferences chart toggles', () => {
   beforeEach(() => {
@@ -62,5 +67,22 @@ describe('Preferences chart toggles', () => {
       rsi: false,
       levels: true,
     });
+  });
+
+  it('defaults the chat height and persists a clamped value', () => {
+    const preferences = new Preferences();
+    expect(preferences.chatHeight()).toBe(DEFAULT_CHAT_HEIGHT_PX);
+
+    preferences.setChatHeight(500);
+    expect(new Preferences().chatHeight()).toBe(500);
+
+    preferences.setChatHeight(1);
+    expect(preferences.chatHeight()).toBe(MIN_CHAT_HEIGHT_PX);
+
+    localStorage.setItem('osa.chat.height', '9999');
+    expect(new Preferences().chatHeight()).toBe(MAX_CHAT_HEIGHT_PX);
+
+    localStorage.setItem('osa.chat.height', 'not-a-number');
+    expect(new Preferences().chatHeight()).toBe(DEFAULT_CHAT_HEIGHT_PX);
   });
 });

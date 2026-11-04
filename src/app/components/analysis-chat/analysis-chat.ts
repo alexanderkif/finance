@@ -12,6 +12,13 @@ import {
 import { errorMessage, isRetryable } from '../../api-error';
 import { AnalysisResult, Intent, ParseResponse, PositionLeg } from '../../models/market-data';
 import { MarketApi, isAbortError, requestAbortedError } from '../../services/market-data';
+import {
+  DEFAULT_CHAT_HEIGHT_PX,
+  MAX_CHAT_HEIGHT_PX,
+  MIN_CHAT_HEIGHT_PX,
+  Preferences,
+  clampChatHeight,
+} from '../../services/preferences';
 import { AnalysisCard } from '../analysis-card/analysis-card';
 
 interface ChatMessage {
@@ -51,11 +58,18 @@ const FIELD_PROMPTS: Record<string, string> = {
 })
 export class AnalysisChat {
   private readonly api = inject(MarketApi);
+  private readonly preferences = inject(Preferences);
   private readonly chatLog = viewChild<ElementRef<HTMLElement>>('chatLog');
   private readonly chatInput = viewChild<ElementRef<HTMLTextAreaElement>>('chatInput');
   private readonly scrollPinned = signal(true);
+  private resizeStart: { y: number; height: number } | null = null;
   private activeRequest: AbortController | null = null;
   private exampleRequest: AbortController | null = null;
+
+  protected readonly chatHeight = this.preferences.chatHeight;
+  protected readonly minChatHeight = MIN_CHAT_HEIGHT_PX;
+  protected readonly maxChatHeight = MAX_CHAT_HEIGHT_PX;
+  protected readonly resizing = signal(false);
 
   readonly symbol = input.required<string>();
 
@@ -84,6 +98,7 @@ export class AnalysisChat {
         this.messages();
         this.busy();
         this.status();
+        this.chatHeight();
         if (this.scrollPinned()) {
           this.scrollToLatest();
         }
@@ -125,6 +140,67 @@ export class AnalysisChat {
     }
     const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
     this.scrollPinned.set(distanceFromBottom <= 32);
+  }
+
+  protected startResize(event: PointerEvent): void {
+    if (event.button !== 0) {
+      return;
+    }
+    this.resizeStart = { y: event.clientY, height: this.chatHeight() };
+    this.resizing.set(true);
+    const target = event.currentTarget;
+    if (target instanceof HTMLElement) {
+      target.setPointerCapture(event.pointerId);
+    }
+  }
+
+  protected resizeWithPointer(event: PointerEvent): void {
+    const start = this.resizeStart;
+    if (!start) {
+      return;
+    }
+    event.preventDefault();
+    this.chatHeight.set(clampChatHeight(start.height + event.clientY - start.y));
+  }
+
+  protected endResize(event: PointerEvent): void {
+    if (!this.resizeStart) {
+      return;
+    }
+    this.resizeStart = null;
+    this.resizing.set(false);
+    const target = event.currentTarget;
+    if (target instanceof HTMLElement && target.hasPointerCapture(event.pointerId)) {
+      target.releasePointerCapture(event.pointerId);
+    }
+    this.preferences.setChatHeight(this.chatHeight());
+  }
+
+  protected resizeWithKeyboard(event: KeyboardEvent): void {
+    const step = event.shiftKey ? 80 : 24;
+    let next: number;
+    switch (event.key) {
+      case 'ArrowUp':
+        next = this.chatHeight() + step;
+        break;
+      case 'ArrowDown':
+        next = this.chatHeight() - step;
+        break;
+      case 'Home':
+        next = MIN_CHAT_HEIGHT_PX;
+        break;
+      case 'End':
+        next = MAX_CHAT_HEIGHT_PX;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    this.preferences.setChatHeight(clampChatHeight(next));
+  }
+
+  protected resetChatHeight(): void {
+    this.preferences.setChatHeight(DEFAULT_CHAT_HEIGHT_PX);
   }
 
   protected setIntent(event: Event): void {

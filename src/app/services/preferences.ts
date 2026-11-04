@@ -16,8 +16,12 @@ const THEME_KEY = 'osa.theme';
 const SYMBOL_KEY = 'osa.symbol';
 const CHART_TOGGLES_KEY = 'osa.chart.toggles';
 const RANGE_KEY = 'osa.range';
+const CHAT_HEIGHT_KEY = 'osa.chat.height';
 const SYMBOL_PATTERN = /^[A-Z0-9._-]{1,15}$/;
 const CHART_RANGES: readonly ChartRange[] = ['1mo', '3mo', '6mo', '1y', '5y'];
+export const DEFAULT_CHAT_HEIGHT_PX = 640;
+export const MIN_CHAT_HEIGHT_PX = 240;
+export const MAX_CHAT_HEIGHT_PX = 960;
 const DEFAULT_CHART_TOGGLES: ChartToggles = {
   sma20: false,
   sma50: false,
@@ -33,6 +37,7 @@ export class Preferences {
   readonly chartToggles = signal<ChartToggles>({
     ...DEFAULT_CHART_TOGGLES,
   });
+  readonly chatHeight = signal(DEFAULT_CHAT_HEIGHT_PX);
 
   constructor() {
     if (typeof document === 'undefined' || typeof localStorage === 'undefined') {
@@ -58,6 +63,7 @@ export class Preferences {
 
     this.chartToggles.set(this.readChartToggles());
     this.range.set(this.readRange());
+    this.chatHeight.set(this.readChatHeight());
   }
 
   setTheme(theme: Theme): void {
@@ -92,6 +98,14 @@ export class Preferences {
     }
   }
 
+  setChatHeight(value: number): void {
+    const height = clampChatHeight(value);
+    this.chatHeight.set(height);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(CHAT_HEIGHT_KEY, String(height));
+    }
+  }
+
   setChartToggle(key: ChartToggle, value: boolean): void {
     this.chartToggles.update((current) => ({ ...current, [key]: value }));
     if (typeof localStorage === 'undefined') {
@@ -106,6 +120,18 @@ export class Preferences {
     }
     const stored = localStorage.getItem(RANGE_KEY);
     return CHART_RANGES.includes(stored as ChartRange) ? (stored as ChartRange) : '6mo';
+  }
+
+  private readChatHeight(): number {
+    if (typeof localStorage === 'undefined') {
+      return DEFAULT_CHAT_HEIGHT_PX;
+    }
+    const raw = localStorage.getItem(CHAT_HEIGHT_KEY);
+    if (raw === null) {
+      return DEFAULT_CHAT_HEIGHT_PX;
+    }
+    const value = Number(raw);
+    return Number.isFinite(value) ? clampChatHeight(value) : DEFAULT_CHAT_HEIGHT_PX;
   }
 
   private readChartToggles(): ChartToggles {
@@ -136,6 +162,10 @@ export class Preferences {
   private applyTheme(theme: Theme): void {
     document.documentElement.dataset['theme'] = theme;
   }
+}
+
+export function clampChatHeight(value: number): number {
+  return Math.min(MAX_CHAT_HEIGHT_PX, Math.max(MIN_CHAT_HEIGHT_PX, Math.round(value)));
 }
 
 function readToggle(source: Record<string, unknown>, key: ChartToggle): boolean {

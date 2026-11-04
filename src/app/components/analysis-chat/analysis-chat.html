@@ -1,4 +1,4 @@
-<section class="chat-card" aria-labelledby="chat-title">
+<section class="chat-card" [class.chat-card-resizing]="resizing()" aria-labelledby="chat-title">
   <header class="chat-header">
     <div>
       <h2 id="chat-title">Strategy analysis chat</h2>
@@ -16,47 +16,83 @@
     </button>
   </header>
 
-  <div
-    #chatLog
-    class="chat-log"
-    role="log"
-    aria-live="polite"
-    aria-label="Conversation"
-    (scroll)="onScroll($event)"
-  >
-    @for (message of messages(); track $index) {
-      <article class="message" [class.message-user]="message.role === 'user'">
-        <div class="message-head">
-          <span class="message-role">
-            {{ message.role === 'user' ? 'You' : 'Assistant' }}
-          </span>
-          @if (message.role === 'user' && message.text) {
-            <button
-              type="button"
-              class="message-edit"
-              (click)="editMessage(message.text)"
-              aria-label="Edit message in the chat input"
-              title="Edit in chat input"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path
-                  fill="currentColor"
-                  d="M4 17.25V20h2.75L17.8 8.94l-2.75-2.75L4 17.25zm15.7-10.2a1 1 0 0 0 0-1.41l-1.34-1.34a1 1 0 0 0-1.41 0l-1.13 1.13 2.75 2.75 1.13-1.13z"
-                />
-              </svg>
-            </button>
+  <div class="chat-log-frame">
+    <div
+      #chatLog
+      id="chat-log"
+      class="chat-log"
+      role="log"
+      aria-live="polite"
+      aria-label="Conversation"
+      [style.height.px]="chatHeight()"
+      (scroll)="onScroll($event)"
+    >
+      @for (message of messages(); track $index) {
+        <article class="message" [class.message-user]="message.role === 'user'">
+          <div class="message-head">
+            <span class="message-role">
+              {{ message.role === 'user' ? 'You' : 'Assistant' }}
+            </span>
+            @if (message.role === 'user' && message.text) {
+              <button
+                type="button"
+                class="message-edit"
+                (click)="editMessage(message.text)"
+                aria-label="Edit message in the chat input"
+                title="Edit in chat input"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path
+                    fill="currentColor"
+                    d="M4 17.25V20h2.75L17.8 8.94l-2.75-2.75L4 17.25zm15.7-10.2a1 1 0 0 0 0-1.41l-1.34-1.34a1 1 0 0 0-1.41 0l-1.13 1.13 2.75 2.75 1.13-1.13z"
+                  />
+                </svg>
+              </button>
+            }
+          </div>
+          @if (message.analysis; as result) {
+            <app-analysis-card [result]="result" />
+          } @else {
+            <p>{{ message.text }}</p>
           }
-        </div>
-        @if (message.analysis; as result) {
-          <app-analysis-card [result]="result" />
-        } @else {
-          <p>{{ message.text }}</p>
-        }
-      </article>
-    }
-    @if (busy()) {
-      <p class="thinking" role="status">{{ status() ?? 'Working…' }}</p>
-    }
+        </article>
+      }
+      @if (busy()) {
+        <p class="thinking" role="status">{{ status() ?? 'Working…' }}</p>
+      }
+    </div>
+
+    <div
+      class="chat-resizer"
+      role="separator"
+      aria-orientation="horizontal"
+      aria-label="Resize conversation"
+      aria-controls="chat-log"
+      aria-valuemin="{{ minChatHeight }}"
+      aria-valuemax="{{ maxChatHeight }}"
+      aria-valuenow="{{ chatHeight() }}"
+      aria-valuetext="{{ chatHeight() }} pixels"
+      aria-keyshortcuts="ArrowUp ArrowDown Home End"
+      tabindex="0"
+      title="Drag to resize. Double-click to reset."
+      (pointerdown)="startResize($event)"
+      (pointermove)="resizeWithPointer($event)"
+      (pointerup)="endResize($event)"
+      (pointercancel)="endResize($event)"
+      (lostpointercapture)="endResize($event)"
+      (keydown)="resizeWithKeyboard($event)"
+      (dblclick)="resetChatHeight()"
+    >
+      <svg class="chat-resizer-grip" viewBox="0 0 16 16" aria-hidden="true">
+        <path
+          d="M13.5 2.5 2.5 13.5M13.5 7.5l-6 6"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.4"
+          stroke-linecap="round"
+        />
+      </svg>
+    </div>
   </div>
 
   @if (error(); as message) {
