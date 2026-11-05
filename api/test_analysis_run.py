@@ -1,7 +1,7 @@
 import json
 import os
 import unittest
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import httpx
@@ -11,6 +11,7 @@ RECOMMENDATION = (
     "This credit spread keeps its maximum profit if the underlying stays above "
     "the breakeven level at expiration."
 )
+NEWS_TIMESTAMP = int(datetime(2030, 10, 24, 9, 0, tzinfo=UTC).timestamp())
 
 
 def twelve_data_payload(count: int = 120) -> dict[str, object]:
@@ -107,9 +108,81 @@ def cboe_payload() -> dict[str, object]:
                     delta=0.40,
                     theta=-0.05,
                 ),
+                contract(
+                    "SPY301115C00734000",
+                    bid=2.00,
+                    ask=2.20,
+                    delta=0.35,
+                    theta=-0.06,
+                ),
+                contract(
+                    "SPY301115C00736000",
+                    bid=1.40,
+                    ask=1.60,
+                    delta=0.28,
+                    theta=-0.05,
+                ),
+                contract(
+                    "SPY301115P00734000",
+                    bid=4.00,
+                    ask=4.20,
+                    delta=-0.35,
+                    theta=-0.12,
+                ),
+                contract(
+                    "SPY301115P00731000",
+                    bid=2.50,
+                    ask=2.70,
+                    delta=-0.25,
+                    theta=-0.08,
+                ),
+                contract(
+                    "SPY301115P00733000",
+                    bid=3.20,
+                    ask=3.40,
+                    delta=-0.30,
+                    theta=-0.10,
+                ),
+                contract(
+                    "SPY301115P00728000",
+                    bid=2.20,
+                    ask=2.40,
+                    delta=-0.20,
+                    theta=-0.07,
+                ),
+                contract(
+                    "SPY270115P00732000",
+                    bid=5.00,
+                    ask=5.20,
+                    delta=-0.25,
+                    theta=-0.04,
+                ),
+                contract(
+                    "SPY270115P00729000",
+                    bid=4.40,
+                    ask=4.60,
+                    delta=-0.22,
+                    theta=-0.04,
+                ),
             ],
         },
     }
+
+
+def company_news() -> list[dict[str, object]]:
+    return [
+        {
+            "category": "company",
+            "datetime": NEWS_TIMESTAMP,
+            "headline": "SPY edges higher as breadth improves",
+            "id": 1,
+            "image": "",
+            "related": "SPY",
+            "source": "Newswire",
+            "summary": "",
+            "url": "https://example.com/spy-news",
+        }
+    ]
 
 
 def spread_body() -> dict[str, object]:
@@ -166,9 +239,15 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         self.gemini_requests: list[httpx.Request] = []
         self.cboe_requests: list[httpx.Request] = []
         self.twelve_data_requests: list[httpx.Request] = []
+        self.finnhub_requests: list[httpx.Request] = []
+        self.finnhub_items = company_news()
         self.environment = patch.dict(
             os.environ,
-            {"GEMINI_API_KEY": "test-key", "TWELVE_DATA_API_KEY": "test-key"},
+            {
+                "GEMINI_API_KEY": "test-key",
+                "TWELVE_DATA_API_KEY": "test-key",
+                "FINNHUB_API_KEY": "test-key",
+            },
         )
         self.environment.start()
         self.addCleanup(self.environment.stop)
@@ -182,6 +261,8 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         app.state.twelve_data_provider_client = None
         app.state.cboe_history_provider = None
         app.state.cboe_history_provider_client = None
+        app.state.finnhub_provider = None
+        app.state.finnhub_provider_client = None
         self.api_client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url="http://test",
@@ -218,6 +299,9 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
             if self.twelve_data_status != 200:
                 return httpx.Response(self.twelve_data_status, json={"error": "x"})
             return httpx.Response(200, json=twelve_data_payload())
+        if request.url.host == "finnhub.io":
+            self.finnhub_requests.append(request)
+            return httpx.Response(200, json=self.finnhub_items)
         return httpx.Response(404, json={"detail": "unexpected host"})
 
     async def test_run_endpoint_is_documented_in_openapi(self) -> None:
@@ -225,6 +309,7 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("/api/analysis/run", response.json()["paths"])
+        self.assertIn("/api/analysis/run/stream", response.json()["paths"])
 
     async def test_run_returns_deterministic_bull_put_metrics(self) -> None:
         response = await self.api_client.post("/api/analysis/run", json=spread_body())
@@ -268,6 +353,13 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(body["degraded"])
         self.assertEqual(body["warnings"], [])
         self.assertEqual(body["recommendation"], RECOMMENDATION)
+        self.assertEqual(body["news_source"], "finnhub")
+        self.assertEqual(len(body["news"]), 1)
+        self.assertEqual(
+            body["news"][0]["title"],
+            "SPY edges higher as breadth improves",
+        )
+        self.assertIsNotNone(body["news_as_of"])
 
     async def test_run_does_not_depend_on_chart_or_news_providers(self) -> None:
         with patch.dict(
@@ -279,11 +371,15 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(response.status_code, 200)
+        body = response.json()
         self.assertEqual(
-            response.json()["header"],
+            body["header"],
             "Bull Put Spread SPY 732/729 2030-11-15",
         )
         self.assertEqual(len(self.gemini_requests), 1)
+        self.assertIn("news_provider_not_configured", body["warnings"])
+        self.assertTrue(body["degraded"])
+        self.assertEqual(body["news"], [])
 
     async def test_run_uses_one_gemini_call_with_computed_facts(self) -> None:
         await self.api_client.post("/api/analysis/run", json=spread_body())
@@ -308,6 +404,197 @@ class AnalysisRunApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(facts["metrics"]["current_iv"], 0.14)
         self.assertIsNotNone(facts["metrics"]["hv_60d"])
         self.assertIsNotNone(facts["metrics"]["iv_hv_ratio"])
+        self.assertEqual(
+            facts["recent_news"][0]["title"],
+            "SPY edges higher as breadth improves",
+        )
+
+    async def test_run_stream_emits_real_stages_and_result(self) -> None:
+        async with self.api_client.stream(
+            "POST",
+            "/api/analysis/run/stream",
+            json=spread_body(),
+            headers={"Accept": "application/x-ndjson"},
+        ) as response:
+            self.assertEqual(response.status_code, 200)
+            lines = [
+                line async for line in response.aiter_lines() if line.strip()
+            ]
+        events = [json.loads(line) for line in lines]
+        stages = [event for event in events if event["type"] == "stage"]
+        self.assertTrue(stages)
+        self.assertEqual(
+            {event["id"] for event in stages},
+            {"history", "news", "chain", "quote", "metrics", "synthesis"},
+        )
+        self.assertTrue(
+            all(event["status"] in {"started", "done"} for event in stages)
+        )
+        self.assertEqual(events[-1]["type"], "result")
+        self.assertEqual(
+            events[-1]["result"]["header"],
+            "Bull Put Spread SPY 732/729 2030-11-15",
+        )
+        news_events = [event for event in events if event["type"] == "news"]
+        self.assertEqual(len(news_events), 1)
+
+    async def test_run_resolves_a_shift_against_the_listed_ladder(self) -> None:
+        base = spread_body()["position"]
+        body = {
+            "position": None,
+            "context": [base],
+            "reference": {
+                "kind": "shift",
+                "strikes": 2,
+                "direction": "up",
+                "expiration": None,
+            },
+            "intent": "open",
+            "detected_language": "English",
+        }
+
+        response = await self.api_client.post("/api/analysis/run", json=body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["header"],
+            "Bull Put Spread SPY 734/732 2030-11-15",
+        )
+
+    async def test_run_widens_a_put_spread_by_listed_strikes(self) -> None:
+        base = spread_body()["position"]
+        body = {
+            "position": None,
+            "context": [base],
+            "reference": {
+                "kind": "widen",
+                "strikes": 1,
+                "direction": None,
+                "expiration": None,
+            },
+            "intent": "open",
+            "detected_language": "English",
+        }
+
+        response = await self.api_client.post("/api/analysis/run", json=body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["header"],
+            "Bull Put Spread SPY 732/728 2030-11-15",
+        )
+
+    async def test_run_rejects_a_width_change_that_removes_the_spread(self) -> None:
+        base = spread_body()["position"]
+        body = {
+            "position": None,
+            "context": [base],
+            "reference": {
+                "kind": "narrow",
+                "strikes": 4,
+                "direction": None,
+                "expiration": None,
+            },
+            "intent": "open",
+            "detected_language": "English",
+        }
+
+        response = await self.api_client.post("/api/analysis/run", json=body)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("remove the spread", response.json()["detail"])
+
+    async def test_run_widens_a_call_spread_in_the_correct_direction(self) -> None:
+        base = {
+            "position_type": "strategy",
+            "legs": [
+                {
+                    "symbol": "SPY",
+                    "side": "sell",
+                    "option_type": "call",
+                    "strike": 732,
+                    "expiration": "2030-11-15",
+                },
+                {
+                    "symbol": "SPY",
+                    "side": "buy",
+                    "option_type": "call",
+                    "strike": 734,
+                    "expiration": "2030-11-15",
+                },
+            ],
+        }
+        body = {
+            "position": None,
+            "context": [base],
+            "reference": {
+                "kind": "widen",
+                "strikes": 1,
+                "direction": None,
+                "expiration": None,
+            },
+            "intent": "open",
+            "detected_language": "English",
+        }
+
+        response = await self.api_client.post("/api/analysis/run", json=body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["header"],
+            "Bear Call Spread SPY 732/736 2030-11-15",
+        )
+
+    async def test_run_moves_a_spread_to_a_new_expiration(self) -> None:
+        base = spread_body()["position"]
+        body = {
+            "position": None,
+            "context": [base],
+            "reference": {
+                "kind": "expiration",
+                "strikes": None,
+                "direction": None,
+                "expiration": "2027-01-15",
+            },
+            "intent": "open",
+            "detected_language": "English",
+        }
+
+        response = await self.api_client.post("/api/analysis/run", json=body)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["header"],
+            "Bull Put Spread SPY 732/729 2027-01-15",
+        )
+
+    async def test_run_reports_nearest_strikes_for_an_unlisted_strike(self) -> None:
+        body = single_body()
+        body["position"]["legs"][0]["strike"] = 999
+
+        response = await self.api_client.post("/api/analysis/run", json=body)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("Nearby listed strikes", response.json()["detail"])
+
+    async def test_run_rejects_a_reference_without_previous_position(self) -> None:
+        body = {
+            "position": None,
+            "context": [],
+            "reference": {
+                "kind": "same",
+                "strikes": None,
+                "direction": None,
+                "expiration": None,
+            },
+            "intent": "open",
+            "detected_language": "English",
+        }
+
+        response = await self.api_client.post("/api/analysis/run", json=body)
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("previous position", response.json()["detail"])
 
     async def test_run_returns_an_unbounded_long_call(self) -> None:
         response = await self.api_client.post("/api/analysis/run", json=single_body())

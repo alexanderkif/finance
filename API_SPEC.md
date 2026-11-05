@@ -34,7 +34,9 @@ Unavailable values are explicit; see [DATA_CONTRACT.md](DATA_CONTRACT.md).
   instead of raw upstream status text.
 - The Angular chat retries `502`, `503`, `504`, and network (`0`) responses up
   to two more times, names the unavailable service between attempts, and offers
-  a Cancel button. Sending a new message cancels the previous request chain.
+  a Cancel button. It reads `/api/analysis/run/stream` incrementally and treats
+  `error` events as the HTTP-equivalent failure. Sending a new message aborts
+  the stream and ignores stale events.
 - After a non-validation failure, the chat offers "Retry failed step". A parse
   failure retries parsing and then analysis; an analysis failure retries only
   the analysis step with the already parsed position, without re-sending the
@@ -130,7 +132,8 @@ Request:
 ```json
 {
   "message": "sell 732 put and buy 729 put XSP 2030-11-15",
-  "default_symbol": "SPY"
+  "default_symbol": "SPY",
+  "context": []
 }
 ```
 
@@ -142,6 +145,8 @@ legs: { symbol, side, option_type, strike, expiration }[]
 missing_fields: string[]
 detected_language: string
 strategy_key?: string
+header?: string
+reference?: { kind, strikes, direction, expiration }
 ```
 
 `default_symbol` is optional and defaults to `SPY`; the frontend should pass
@@ -151,6 +156,15 @@ dates to `YYYY-MM-DD` and classify a vertical spread only when its legs satisfy
 the truth table in [PLAYBOOK_SPEC.md](PLAYBOOK_SPEC.md). When expiration is the
 only missing leg field, return exactly `missing_fields: ["expiration"]`; do
 not start analysis.
+
+`context` is an optional, client-owned list of up to three complete previous
+positions. The extraction call may use it to resolve references such as "the
+same spread", "shift two strikes up", "widen by two strikes", or "change the
+expiration". It returns absolute legs and an optional `reference` operation.
+Context is validated separately; the deterministic scope check runs only on
+the new message. Return `header` for a complete, non-reference position. When
+two legs do not form a supported vertical spread, return `422` with a
+one-position explanation instead of asking which spread is meant.
 
 ## Chat scope and misuse guardrails
 
@@ -193,10 +207,10 @@ symbol, message, description, legs[], current_price, source, as_of
 - Pick the highest executable put strike at or below 99% of the underlying
   price; fall back to the nearest executable strike below the price.
 - Pick the next lower executable put strike as the long leg.
-- `message` is a verbose sentence containing every parser field.
-  `description` explains the mechanics in plain language. The chat submits
-  `message` immediately instead of rendering `description` as a separate
-  assistant bubble.
+- `message` is a verbose sentence containing every parser field and no
+  intent. Intent always comes from the chat selector. `description` explains
+  the mechanics in plain language. The chat submits `message` immediately
+  instead of rendering `description` as a separate assistant bubble.
 - Both are regenerated per request, so the expiration and strikes follow the
   live chain instead of a hardcoded sample.
 - Return `422` when the chain has no executable puts or no lower strike.
@@ -232,6 +246,8 @@ Request:
       }
     ]
   },
+  "context": [],
+  "reference": null,
   "intent": "open",
   "detected_language": "English"
 }
@@ -244,7 +260,14 @@ Request:
 - Every leg field is required. Incomplete input is rejected with `422` instead
   of being guessed.
 - Return `422` when the chain has no matching contract or no executable bid/ask
-  for a leg.
+  for a leg. The error names the nearest listed strikes when they exist.
+- `position` is optional when `reference` is supplied. `reference` describes a
+  client-approved edit against the most recent item in `context` (`same`,
+  `shift`, `widen`, `narrow`, `expiration`). The server resolves it against
+  the real listed strike ladder before validating or calculating anything.
+  A reference without context returns `422`.
+- Intent always comes from the client selector; it is never inferred from the
+  position text.
 
 Response `AnalysisResult`:
 
@@ -252,8 +275,8 @@ Response `AnalysisResult`:
 strategy_key, intent, header, recommendation, probability_positive, max_profit,
 max_loss, net_credit_debit, breakeven, theta_daily, iv_rank, current_iv,
 hv_20d, hv_60d, hv_rank, iv_hv_ratio, event_flags, liquidity, scenario_1sigma,
-scenario_2sigma, detected_language, disclaimer, source, as_of, degraded,
-warnings[]
+scenario_2sigma, news[], news_source, news_as_of, detected_language,
+disclaimer, source, as_of, degraded, warnings[]
 ```
 
 Conventions:
@@ -286,6 +309,14 @@ Conventions:
 - `event_flags` lists the playbook's own event sensitivity (`earnings`,
   `dividends`, `macro`). It describes which event types the strategy is exposed
   to; it is not a live event calendar and does not claim an event is scheduled.
+- `news` contains up to five ticker-specific Finnhub headlines from the last
+  30 days. They are supplied to synthesis only as context: they never supply a
+  metric, and they are not a dividend, earnings, or splits calendar. A missing
+  key, rate limit, outage, or empty result yields
+  `news_provider_not_configured`, `news_rate_limited`, or `news_unavailable`
+  with `news: []`, `news_source: null`, and a non-blocking warning.
+  `news_as_of` is the newest headline timestamp when one exists. No
+  general-news fallback is presented as instrument news.
 - `liquidity` reports the worst-leg bid/ask spread percent, the minimum open
   interest and volume across legs, and a `good`/`fair`/`poor`/`unknown` rating.
 - `scenario_1sigma` is the expected move over the option's days to expiration:
@@ -314,6 +345,40 @@ max_loss: 150.0
 breakeven: 730.5
 disclaimer: "Educational analysis, not investment advice."
 ```
+
+## `POST /api/analysis/run/stream`
+
+The same request body and analysis as `/api/analysis/run`, returned as
+newline-delimited JSON (`application/x-ndjson`). This is one market-data
+request; stages are progress events, not separate data fetches. The client
+sends `Accept: application/x-ndjson`.
+
+Event shapes, one JSON object per line:
+
+```text
+{ "type": "stage", "id": "history|news|chain|quote|metrics|synthesis",
+  "status": "started|done|failed", "label": string, "detail"?: string }
+{ "type": "position", "position": AnalysisPosition, "header": string }
+{ "type": "news", "news": NewsHeadline[], "source": "finnhub"|null,
+  "as_of": string|null }
+{ "type": "warning", "code": string }
+{ "type": "heartbeat" }
+{ "type": "result", "result": AnalysisResult }
+{ "type": "error", "status": number, "detail": string }
+```
+
+- Only real stages are emitted. Never emit progress from a client timer.
+- `position` follows the chain load and carries the resolved, listed legs and
+  deterministic header. For a reference edit it replaces the provisional
+  interpretation shown after parsing.
+- `news` is emitted as soon as ticker headlines are available, so the user can
+  read them while metrics and synthesis run.
+- `heartbeat` keeps a proxy from closing a long synthesis call. Clients ignore
+  it except for liveness.
+- Once streaming starts, errors are `error` events with an HTTP-equivalent
+  status; the stream then ends without a `result`.
+- The server stops between stages when the client disconnects. The client aborts
+  the request when the user cancels or sends a new message.
 
 ## Contract and integration tests
 
@@ -346,9 +411,21 @@ disclaimer: "Educational analysis, not investment advice."
 - Verify chart degradation for a missing key, a rate limit, a paid-plan
   restriction, and an unknown symbol.
 - Verify the example endpoint picks a future expiration, a near-money strike,
-  and the next lower strike, and returns a verbose message. Verify `Use example`
-  submits that message immediately and that the user can edit it from the
-  message's edit-in-input icon.
+  and the next lower strike, and returns a verbose message without an intent.
+  Verify `Use example` submits that message immediately and that the user can
+  edit it from the message's edit-in-input icon.
+- Verify the stream endpoint emits only real stages, an early `position`, a
+  `news` event when headlines exist, and a final `result`; verify an `error`
+  event ends the stream with the expected status.
+- Verify parse context reaches the extraction call, reference wording is
+  accepted only with context, and a two-leg unrelated request returns the
+  one-position `422`.
+- Verify a reference shift resolves against the listed strike ladder, a
+  reference without context returns `422`, and an unlisted strike names the
+  nearest listed strikes.
+- Verify analysis includes ticker news when available and degrades with a
+  warning when Finnhub is missing, rate limited, or empty; no general-news
+  fallback is presented as instrument news.
 - Mock CBOE 503 and verify the single retry, then a degraded response with no
   fabricated values.
 - Mock CBOE 429 with a fresh cache and verify no upstream call is made; with a

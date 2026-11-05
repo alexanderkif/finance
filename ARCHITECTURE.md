@@ -79,8 +79,15 @@ The legacy dashboard has been replaced. Follow [src/AGENTS.md](src/AGENTS.md).
   chart requirements.
 - Chart, levels, and news data must come from the API. Render explicit
   unavailable states instead of synthetic series or placeholder values.
-- The chat collects the intent (open, close, roll) separately because parsing
-  currently returns position legs and language only.
+- The chat collects the intent (open, close, roll) separately; intent is never
+  inferred from position text or the example message.
+- The chat streams `POST /api/analysis/run/stream` as NDJSON through `fetch` to
+  show real stage progress, the interpreted position, and recent headlines
+  before the analysis card. `POST /api/analysis/run` remains the JSON endpoint
+  for other clients.
+- The client keeps the last three complete parsed positions and sends them as
+  `context`; no user state is stored server-side. Reference edits are applied
+  against the listed strike ladder before any metric is computed.
 
 ## Agent boundary
 
@@ -93,10 +100,14 @@ HV percentile, and IV/HV are computed from the chart candle providers. A true
 IV rank needs a historical IV series and stays `null` until one exists. LLM calls
 are limited to extraction and synthesis: one extraction call in
 `POST /api/analysis/parse` and at most one synthesis call in
-`POST /api/analysis/run`. The synthesis prompt receives computed facts and must
-not perform arithmetic. Deterministic limits and a scope check run before
-extraction: off-topic, oversized, abusive, or prompt-injection input is refused
-without a Gemini call and without an analysis card.
+`POST /api/analysis/run` (or its streaming variant). The synthesis prompt
+receives computed facts and optional ticker headlines as context, and must not
+perform arithmetic or present news as a calendar. The extraction call may also
+receive client-owned previous positions to resolve references, but every
+resulting leg is validated against the real listed chain before metrics run.
+Deterministic limits and a scope check run before extraction: off-topic,
+oversized, abusive, or prompt-injection input is refused without a Gemini call
+and without an analysis card.
 
 ## Guardrails
 

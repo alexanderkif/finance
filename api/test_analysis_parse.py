@@ -103,6 +103,7 @@ class AnalysisParseApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["strategy_key"], "bull_put_spread")
         self.assertEqual(body["missing_fields"], [])
         self.assertEqual(body["legs"][0]["expiration"], "2030-11-15")
+        self.assertEqual(body["header"], "Bull Put Spread XSP 732/729 2030-11-15")
         self.assert_gemini_request_is_structured()
 
     async def test_parses_bear_call_spread_with_dotted_expiration(self) -> None:
@@ -160,6 +161,110 @@ class AnalysisParseApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["missing_fields"], ["expiration"])
         self.assertEqual(response.json()["strategy_key"], "long_call")
         self.assertIsNone(response.json()["legs"][0]["expiration"])
+
+    async def test_parse_receives_previous_positions_and_returns_a_reference(
+        self,
+    ) -> None:
+        self.model_result = {
+            "legs": [
+                {
+                    "symbol": "SPY",
+                    "side": "sell",
+                    "option_type": "put",
+                    "strike": 734,
+                    "expiration": "2030-11-15",
+                },
+                {
+                    "symbol": "SPY",
+                    "side": "buy",
+                    "option_type": "put",
+                    "strike": 732,
+                    "expiration": "2030-11-15",
+                },
+            ],
+            "detected_language": "English",
+            "reference": {
+                "kind": "shift",
+                "strikes": 2,
+                "direction": "up",
+                "expiration": None,
+            },
+        }
+        context = [
+            {
+                "position_type": "strategy",
+                "legs": [
+                    {
+                        "symbol": "SPY",
+                        "side": "sell",
+                        "option_type": "put",
+                        "strike": 732,
+                        "expiration": "2030-11-15",
+                    },
+                    {
+                        "symbol": "SPY",
+                        "side": "buy",
+                        "option_type": "put",
+                        "strike": 729,
+                        "expiration": "2030-11-15",
+                    },
+                ],
+            }
+        ]
+
+        response = await self.api_client.post(
+            "/api/analysis/parse",
+            json={
+                "message": "shift it two strikes up",
+                "context": context,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["reference"]["kind"], "shift")
+        self.assertEqual(body["reference"]["strikes"], 2)
+        self.assertNotIn("header", body)
+        request_body = json.loads(self.requests[-1].content)
+        payload = json.loads(request_body["contents"][0]["parts"][0]["text"])
+        self.assertEqual(len(payload["previous_positions"]), 1)
+
+    async def test_reference_wording_is_refused_without_context(self) -> None:
+        response = await self.api_client.post(
+            "/api/analysis/parse",
+            json={"message": "move it two up"},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(self.requests, [])
+
+    async def test_refuses_two_unrelated_legs_as_one_position(self) -> None:
+        self.model_result = extracted_position(
+            [
+                {
+                    "symbol": "SPY",
+                    "side": "buy",
+                    "option_type": "call",
+                    "strike": 600,
+                    "expiration": "2030-11-15",
+                },
+                {
+                    "symbol": "QQQ",
+                    "side": "buy",
+                    "option_type": "put",
+                    "strike": 500,
+                    "expiration": "2030-11-15",
+                },
+            ]
+        )
+
+        response = await self.api_client.post(
+            "/api/analysis/parse",
+            json={"message": "Analyze a SPY call and a QQQ put."},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("one option", response.json()["detail"])
 
     async def test_uses_the_selected_ticker_when_message_omits_symbol(self) -> None:
         self.model_result = extracted_position(

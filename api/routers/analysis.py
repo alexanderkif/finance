@@ -1,15 +1,25 @@
+import asyncio
+import json
 import re
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import date, datetime
 from typing import Literal
 
 import httpx
-from agent.graph import AnalysisResult, run_analysis
+from agent.graph import AnalysisResult, run_analysis_events
 from core.cboe_history_provider import CboeHistoryError
 from core.cboe_provider import (
+    CboeOptionQuote,
     CboePayloadError,
     CboeRateLimitedError,
     CboeUnavailableError,
     parse_occ_symbol,
+)
+from core.finnhub_provider import (
+    FinnhubConfigurationError,
+    FinnhubRateLimitError,
+    FinnhubRequestError,
+    NewsHeadline,
 )
 from core.guardrails import GuardrailViolation, check_chat_request
 from core.gemini_provider import (
@@ -21,12 +31,19 @@ from core.gemini_provider import (
     extract_position,
 )
 from core.indicators import Candle
-from core.metrics import AnalysisPosition
-from core.playbook_registry import PlaybookKey, load_playbooks
+from core.metrics import AnalysisPosition, OptionLeg, format_header
+from core.playbook_registry import Playbook, PlaybookKey, load_playbooks
+from core.reference_edits import (
+    ReferenceEdit,
+    ReferenceResolutionError,
+    resolve_reference_position,
+)
 from core.twelvedata_provider import TwelveDataError
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from routers.chart import get_cboe_history_provider, get_twelve_data_provider
+from routers.market import get_finnhub_provider
 from routers.options import get_options_provider
 
 router = APIRouter()
@@ -63,6 +80,7 @@ class ParseRequest(BaseModel):
 
     message: str = Field(min_length=1, max_length=2_000)
     default_symbol: str = Field(default="SPY", max_length=15)
+    context: list[AnalysisPosition] = Field(default_factory=list, max_length=3)
 
     @field_validator("message")
     @classmethod
@@ -83,7 +101,9 @@ class ParseRequest(BaseModel):
 class AnalysisRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    position: AnalysisPosition
+    position: AnalysisPosition | None = None
+    context: list[AnalysisPosition] = Field(default_factory=list, max_length=3)
+    reference: ReferenceEdit | None = None
     intent: Literal["open", "close", "roll"]
     detected_language: str = Field(min_length=2, max_length=24)
 
@@ -124,6 +144,8 @@ class ParseResponse(BaseModel):
     missing_fields: list[str]
     detected_language: str
     strategy_key: PlaybookKey | None = None
+    header: str | None = None
+    reference: ReferenceEdit | None = None
 
 
 def parse_expiration(value: str | None) -> date | None:
@@ -196,9 +218,25 @@ def build_parse_response(
         for field in _FIELD_ORDER
         if any(getattr(leg, field) is None for leg in legs)
     ]
+    reference = _parse_reference(extracted.reference)
     strategy_key = classify_strategy(legs)
     if len(legs) == 2 and strategy_key is None and not missing_fields:
-        missing_fields.append("strategy_type")
+        if reference is not None:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "I could not apply that change to the previous position. "
+                    "Please name the full position instead."
+                ),
+            )
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "I can only analyze one option or one two-leg vertical spread "
+                "per message. Those legs do not form a supported vertical "
+                "spread; please send one position at a time."
+            ),
+        )
 
     response: dict[str, object] = {
         "position_type": "single" if len(legs) == 1 else "strategy",
@@ -208,8 +246,43 @@ def build_parse_response(
     }
     if strategy_key is not None:
         response["strategy_key"] = strategy_key
+    if reference is not None:
+        response["reference"] = reference
+    elif strategy_key is not None and not missing_fields:
+        response["header"] = format_header(
+            _PLAYBOOKS[strategy_key].display_name,
+            [
+                OptionLeg(
+                    symbol=leg.symbol,
+                    side=leg.side,
+                    option_type=leg.option_type,
+                    strike=leg.strike,
+                    expiration=leg.expiration,
+                )
+                for leg in legs
+            ],
+        )
 
     return ParseResponse.model_validate(response)
+
+
+def _parse_reference(
+    reference: object,
+) -> ReferenceEdit | None:
+    if reference is None:
+        return None
+    kind = getattr(reference, "kind", None)
+    if kind is None:
+        return None
+    try:
+        return ReferenceEdit(
+            kind=kind,
+            strikes=getattr(reference, "strikes", None),
+            direction=getattr(reference, "direction", None),
+            expiration=parse_expiration(getattr(reference, "expiration", None)),
+        )
+    except (ValueError, ValidationError, GeminiResponseError):
+        return None
 
 
 @router.post(
@@ -222,7 +295,11 @@ async def parse_analysis(
     request: Request,
 ) -> ParseResponse:
     try:
-        check_chat_request(body.message, body.default_symbol)
+        check_chat_request(
+            body.message,
+            body.default_symbol,
+            has_context=bool(body.context),
+        )
     except GuardrailViolation as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -231,7 +308,12 @@ async def parse_analysis(
         raise HTTPException(status_code=503, detail="Analysis service is not ready.")
 
     try:
-        extracted = await extract_position(client, body.message)
+        extracted = await extract_position(
+            client,
+            body.message,
+            context=[position.model_dump(mode="json") for position in body.context],
+            default_symbol=body.default_symbol,
+        )
         return build_parse_response(extracted, body.default_symbol)
     except GeminiConfigurationError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
@@ -257,6 +339,140 @@ async def _load_historical_candles(
         return await get_twelve_data_provider(request).get_daily_candles(symbol, "1y")
     except (TwelveDataError, ValueError):
         return None
+    except Exception:
+        return None
+
+
+async def _load_analysis_news(
+    request: Request,
+    symbol: str,
+) -> tuple[list[NewsHeadline], list[str]]:
+    try:
+        news = await get_finnhub_provider(request).get_analysis_headlines(symbol)
+    except FinnhubConfigurationError:
+        return [], ["news_provider_not_configured"]
+    except FinnhubRateLimitError:
+        return [], ["news_rate_limited"]
+    except (FinnhubRequestError, ValueError):
+        return [], ["news_unavailable"]
+    except Exception:
+        return [], ["news_unavailable"]
+    if not news:
+        return [], ["news_unavailable"]
+    return news, []
+
+
+PositionResolver = Callable[
+    [list[CboeOptionQuote], datetime],
+    tuple[AnalysisPosition, PlaybookKey, Playbook],
+]
+
+
+def _prepare_run(
+    body: AnalysisRunRequest,
+) -> tuple[str, date, PositionResolver]:
+    if body.reference is not None:
+        if not body.context:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "I need the previous position before I can apply that "
+                    "change. Please describe the full position."
+                ),
+            )
+        base = body.context[-1]
+        symbol = base.legs[0].symbol
+        expiration = body.reference.expiration or base.legs[0].expiration
+
+        def resolve_reference(
+            contracts: list[CboeOptionQuote],
+            _as_of: datetime,
+        ) -> tuple[AnalysisPosition, PlaybookKey, Playbook]:
+            position = resolve_reference_position(
+                body.reference,
+                body.context,
+                contracts,
+                expiration,
+            )
+            return position, *_classify_position(position)
+
+        return symbol, expiration, resolve_reference
+
+    if body.position is None:
+        raise HTTPException(
+            status_code=422,
+            detail="A complete option position is required.",
+        )
+    position = body.position
+    legs = position.legs
+    if position.position_type == "single" and len(legs) != 1:
+        raise HTTPException(
+            status_code=422,
+            detail="A single option position must have exactly one leg.",
+        )
+    if position.position_type == "strategy" and len(legs) != 2:
+        raise HTTPException(
+            status_code=422,
+            detail="A strategy position must have exactly two legs.",
+        )
+    strategy_key, playbook = _classify_position(position)
+
+    def resolve_position(
+        _contracts: list[CboeOptionQuote],
+        _as_of: datetime,
+    ) -> tuple[AnalysisPosition, PlaybookKey, Playbook]:
+        return position, strategy_key, playbook
+
+    return position.legs[0].symbol, position.legs[0].expiration, resolve_position
+
+
+def _classify_position(
+    position: AnalysisPosition,
+) -> tuple[PlaybookKey, Playbook]:
+    strategy_key = classify_strategy(
+        [
+            ParsedLeg(
+                symbol=leg.symbol,
+                side=leg.side,
+                option_type=leg.option_type,
+                strike=leg.strike,
+                expiration=leg.expiration,
+            )
+            for leg in position.legs
+        ]
+    )
+    if strategy_key is None:
+        raise HTTPException(
+            status_code=422,
+            detail="The legs do not form a supported single option or vertical spread.",
+        )
+    return strategy_key, _PLAYBOOKS[strategy_key]
+
+
+async def _analysis_events(
+    request: Request,
+    body: AnalysisRunRequest,
+    *,
+    is_disconnected: Callable[[], Awaitable[bool]] | None = None,
+) -> AsyncGenerator[dict[str, object], None]:
+    client = getattr(request.app.state, "http_client", None)
+    if not isinstance(client, httpx.AsyncClient):
+        raise HTTPException(status_code=503, detail="Analysis service is not ready.")
+
+    symbol, expiration, resolve_position = _prepare_run(body)
+    async for event in run_analysis_events(
+        client=client,
+        provider=get_options_provider(request),
+        symbol=symbol,
+        expiration=expiration,
+        resolve_position=resolve_position,
+        intent=body.intent,
+        detected_language=body.detected_language,
+        history_loader=lambda: _load_historical_candles(request, symbol),
+        news_loader=lambda: _load_analysis_news(request, symbol),
+        is_disconnected=is_disconnected,
+    ):
+        yield event
 
 
 @router.post(
@@ -267,79 +483,90 @@ async def run_analysis_endpoint(
     body: AnalysisRunRequest,
     request: Request,
 ) -> AnalysisResult:
-    client = getattr(request.app.state, "http_client", None)
-    if not isinstance(client, httpx.AsyncClient):
-        raise HTTPException(status_code=503, detail="Analysis service is not ready.")
-
-    legs = body.position.legs
-    if body.position.position_type == "single" and len(legs) != 1:
-        raise HTTPException(
-            status_code=422,
-            detail="A single option position must have exactly one leg.",
-        )
-    if body.position.position_type == "strategy" and len(legs) != 2:
-        raise HTTPException(
-            status_code=422,
-            detail="A strategy position must have exactly two legs.",
-        )
-
-    parsed_legs = [
-        ParsedLeg(
-            symbol=leg.symbol,
-            side=leg.side,
-            option_type=leg.option_type,
-            strike=leg.strike,
-            expiration=leg.expiration,
-        )
-        for leg in legs
-    ]
-    strategy_key = classify_strategy(parsed_legs)
-    if strategy_key is None:
-        raise HTTPException(
-            status_code=422,
-            detail="The legs do not form a supported single option or vertical spread.",
-        )
-
-    historical_candles = await _load_historical_candles(
-        request,
-        body.position.legs[0].symbol,
-    )
+    result: AnalysisResult | None = None
     try:
-        return await run_analysis(
-            client=client,
-            provider=get_options_provider(request),
-            position=body.position,
-            playbook=_PLAYBOOKS[strategy_key],
-            strategy_key=strategy_key,
-            intent=body.intent,
-            detected_language=body.detected_language,
-            historical_candles=historical_candles,
+        async for event in _analysis_events(request, body):
+            if event["type"] == "result":
+                result = AnalysisResult.model_validate(event["result"])
+    except Exception as error:
+        raise _to_http_exception(error) from error
+
+    if result is None:
+        raise HTTPException(
+            status_code=502,
+            detail="The analysis ended without a result. Please try again.",
         )
-    except GeminiConfigurationError as error:
-        raise HTTPException(status_code=503, detail=str(error)) from error
-    except GeminiRateLimitError as error:
-        raise HTTPException(status_code=429, detail=str(error)) from error
-    except GeminiRequestError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    except GeminiResponseError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    except CboeRateLimitedError as error:
-        raise HTTPException(status_code=429, detail=_CBOE_RATE_LIMIT_DETAIL) from error
-    except CboeUnavailableError as error:
-        raise HTTPException(status_code=502, detail=_CBOE_UNAVAILABLE_DETAIL) from error
-    except httpx.HTTPStatusError as error:
+    return result
+
+
+@router.post(
+    "/api/analysis/run/stream",
+    response_model=None,
+    responses={200: {"content": {"application/x-ndjson": {}}}},
+)
+async def run_analysis_stream(
+    body: AnalysisRunRequest,
+    request: Request,
+) -> StreamingResponse:
+    async def generate() -> AsyncGenerator[str, None]:
+        try:
+            async for event in _analysis_events(
+                request,
+                body,
+                is_disconnected=request.is_disconnected,
+            ):
+                yield json.dumps(event, ensure_ascii=False, default=str) + "\n"
+        except Exception as error:
+            http_error = _to_http_exception(error)
+            yield json.dumps(
+                {
+                    "type": "error",
+                    "status": http_error.status_code,
+                    "detail": str(http_error.detail),
+                },
+                ensure_ascii=False,
+            ) + "\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="application/x-ndjson",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+def _to_http_exception(error: Exception) -> HTTPException:
+    if isinstance(error, HTTPException):
+        return error
+    if isinstance(error, GeminiConfigurationError):
+        return HTTPException(status_code=503, detail=str(error))
+    if isinstance(error, GeminiRateLimitError):
+        return HTTPException(status_code=429, detail=str(error))
+    if isinstance(error, (GeminiRequestError, GeminiResponseError)):
+        return HTTPException(status_code=502, detail=str(error))
+    if isinstance(error, CboeRateLimitedError):
+        return HTTPException(status_code=429, detail=_CBOE_RATE_LIMIT_DETAIL)
+    if isinstance(error, CboeUnavailableError):
+        return HTTPException(status_code=502, detail=_CBOE_UNAVAILABLE_DETAIL)
+    if isinstance(error, httpx.HTTPStatusError):
         if error.response.status_code == 404:
-            raise HTTPException(
+            return HTTPException(
                 status_code=404,
                 detail="No CBOE market data was found for this symbol.",
-            ) from error
-        raise HTTPException(status_code=502, detail=_CBOE_UNAVAILABLE_DETAIL) from error
-    except httpx.RequestError as error:
-        raise HTTPException(status_code=502, detail=_CBOE_UNREACHABLE_DETAIL) from error
-    except CboePayloadError as error:
-        raise HTTPException(status_code=502, detail=str(error)) from error
-    except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
+            )
+        return HTTPException(status_code=502, detail=_CBOE_UNAVAILABLE_DETAIL)
+    if isinstance(error, httpx.RequestError):
+        return HTTPException(status_code=502, detail=_CBOE_UNREACHABLE_DETAIL)
+    if isinstance(error, CboePayloadError):
+        return HTTPException(status_code=502, detail=str(error))
+    if isinstance(error, (ValueError, ReferenceResolutionError)):
+        return HTTPException(status_code=422, detail=str(error))
+    return HTTPException(
+        status_code=502,
+        detail="The analysis service failed. Please try again in a moment.",
+    )
 
 
 @router.get("/api/analysis/example/{symbol}", response_model=ExampleResponse)
@@ -429,7 +656,7 @@ async def get_analysis_example(
     days_to_expiration = (expiration - as_of).days
     message = (
         f"Sell the {short_text} put and buy the {long_text} put on "
-        f"{quote.symbol} expiring {expiration.isoformat()} to open a "
+        f"{quote.symbol} expiring {expiration.isoformat()} for a "
         "defined-risk bull put spread."
     )
     description = (

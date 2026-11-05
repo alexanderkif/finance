@@ -94,15 +94,23 @@ unavailable, report `vix: null` with a warning.
 ## Finnhub news
 
 - Company news endpoint:
-  `https://finnhub.io/api/v1/company-news` with a seven-day window.
-- Fall back to `https://finnhub.io/api/v1/news?category=general` when company
-  news is empty.
+  `https://finnhub.io/api/v1/company-news` with a seven-day window for the
+  dashboard and a thirty-day window for analysis context.
+- Dashboard behavior falls back to
+  `https://finnhub.io/api/v1/news?category=general` when company news is empty.
+- Analysis context is ticker-specific only: do not present general news as
+  instrument news. An empty result is `news_unavailable`.
 - Authenticate with the `X-Finnhub-Token` header; never put the key in the URL.
 - Normalize headlines as `{title, url, publisher, published_at}` and return at
-  most three, newest first.
-- Cache headlines for 300 seconds per symbol.
+  most three for the dashboard and at most five for analysis, newest first.
+- Cache headlines for 300 seconds per symbol and window; a cached result may be
+  sliced to a smaller limit.
 - If the provider is unconfigured, rate limited, or fails, return an empty
-  `news` list with a warning. Do not block price, VIX, or chart data.
+  `news` list with a warning. Do not block price, VIX, chart, or options
+  analysis.
+- News may mention dividends, earnings, or splits, but it is not a live event
+  calendar. Structured calendars require separate verified endpoints and must
+  not be inferred from headlines.
 
 ## Analysis volatility context
 

@@ -58,6 +58,14 @@ _UNSUPPORTED_STRATEGY: Final = re.compile(
 )
 _UNSAFE_CHARACTERS: Final = re.compile(r"[<>{}$`\x00-\x1f]")
 _LONG_TOKEN: Final = re.compile(r"\b[A-Za-z0-9._-]{16,}\b")
+_REFERENCE_LANGUAGE: Final = re.compile(
+    r"\b(?:same|previous|prior|last|that|this|it|shift|move|raise|lower|"
+    r"higher|lower|up|down|widen|narrow|increase|decrease|change|"
+    r"такой|та же|тот же|предыдущ\w*|сдвинь\w*|подними\w*|опусти\w*|"
+    r"выше|ниже|шире|уже|ширин\w*|увелич\w*|уменьш\w*|измени\w*|"
+    r"страйк\w*|экспирац\w*)\b",
+    re.IGNORECASE,
+)
 
 _OUT_OF_SCOPE = (
     "I can only analyze a single option or a two-leg vertical spread. "
@@ -82,7 +90,12 @@ class GuardrailViolation(ValueError):
     pass
 
 
-def check_chat_request(message: str, default_symbol: str) -> None:
+def check_chat_request(
+    message: str,
+    default_symbol: str,
+    *,
+    has_context: bool = False,
+) -> None:
     normalized = message.strip()
     if len(normalized) > MAX_MESSAGE_LENGTH:
         raise GuardrailViolation(_TOO_LONG)
@@ -105,11 +118,14 @@ def check_chat_request(message: str, default_symbol: str) -> None:
         raise GuardrailViolation(_TOO_MANY_LEGS)
     if _UNSAFE_CHARACTERS.search(normalized) or _LONG_TOKEN.search(normalized):
         raise GuardrailViolation(_INVALID_SYMBOL)
-    if not _OPTION_VOCABULARY.search(normalized):
+    if not _OPTION_VOCABULARY.search(normalized) and not (
+        has_context and _REFERENCE_LANGUAGE.search(normalized)
+    ):
         raise GuardrailViolation(_OUT_OF_SCOPE)
     if (
         _TEACHING_OR_QUESTION.search(normalized)
         and not _SIDE_ACTIONS.search(normalized)
         and not re.search(r"\d", normalized)
+        and not has_context
     ):
         raise GuardrailViolation(_OUT_OF_SCOPE)

@@ -97,6 +97,8 @@ class AnalysisExampleApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Sell the 760 put", body.message)
         self.assertIn("buy the 755 put", body.message)
         self.assertIn("defined-risk bull put spread", body.message)
+        self.assertNotIn("to open", body.message)
+        self.assertNotIn("open a", body.message)
         self.assertIn("760/755", body.description)
         self.assertEqual(
             body.as_of,

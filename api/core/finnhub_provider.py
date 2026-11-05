@@ -10,7 +10,9 @@ from settings import require_finnhub_api_key
 FINNHUB_BASE_URL: Final = "https://finnhub.io/api/v1"
 FINNHUB_CACHE_TTL_SECONDS: Final = 300.0
 FINNHUB_NEWS_WINDOW_DAYS: Final = 7
+FINNHUB_ANALYSIS_NEWS_WINDOW_DAYS: Final = 30
 FINNHUB_RETRY_DELAY_SECONDS: Final = 0.25
+FINNHUB_MAX_CACHED_HEADLINES: Final = 20
 
 
 class FinnhubError(RuntimeError):
@@ -46,18 +48,27 @@ class FinnhubProvider:
     ) -> None:
         self._client = client
         self._cache_ttl_seconds = cache_ttl_seconds
-        self._cache: dict[str, tuple[float, list[NewsHeadline]]] = {}
+        self._cache: dict[
+            tuple[str, int, bool],
+            tuple[float, list[NewsHeadline]],
+        ] = {}
 
     async def get_headlines(
         self,
         symbol: str,
         limit: int = 3,
         today: date | None = None,
+        *,
+        window_days: int = FINNHUB_NEWS_WINDOW_DAYS,
+        allow_general_fallback: bool = True,
     ) -> list[NewsHeadline]:
         normalized_symbol = symbol.strip().upper().removeprefix("_").removeprefix("^")
         if not normalized_symbol:
             raise ValueError("Symbol must not be empty.")
-        cached = self._cache.get(normalized_symbol)
+        if window_days < 1:
+            raise ValueError("The news window must be at least one day.")
+        cache_key = (normalized_symbol, window_days, allow_general_fallback)
+        cached = self._cache.get(cache_key)
         now = time.monotonic()
         if cached is not None and now - cached[0] < self._cache_ttl_seconds:
             return cached[1][:limit]
@@ -68,7 +79,7 @@ class FinnhubProvider:
             raise FinnhubConfigurationError(str(error)) from error
 
         current_day = today or datetime.now(UTC).date()
-        start_day = current_day - timedelta(days=FINNHUB_NEWS_WINDOW_DAYS)
+        start_day = current_day - timedelta(days=window_days)
         headers = {"X-Finnhub-Token": api_key}
 
         try:
@@ -83,16 +94,31 @@ class FinnhubProvider:
             )
         except FinnhubRequestError:
             items = []
-        if not items:
+        if not items and allow_general_fallback:
             items = await self._get_items(
                 "news",
                 {"category": "general"},
                 headers,
             )
 
-        headlines = _normalize_headlines(items, limit=limit)
-        self._cache[normalized_symbol] = (time.monotonic(), headlines)
-        return headlines
+        headlines = _normalize_headlines(
+            items,
+            limit=FINNHUB_MAX_CACHED_HEADLINES,
+        )
+        self._cache[cache_key] = (time.monotonic(), headlines)
+        return headlines[:limit]
+
+    async def get_analysis_headlines(
+        self,
+        symbol: str,
+        limit: int = 5,
+    ) -> list[NewsHeadline]:
+        return await self.get_headlines(
+            symbol,
+            limit=limit,
+            window_days=FINNHUB_ANALYSIS_NEWS_WINDOW_DAYS,
+            allow_general_fallback=False,
+        )
 
     async def _get_items(
         self,

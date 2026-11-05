@@ -1,5 +1,7 @@
+import asyncio
 import json
-from datetime import datetime
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from datetime import date, datetime
 from typing import Literal
 
 import httpx
@@ -9,6 +11,7 @@ from core.cboe_provider import (
     parse_occ_symbol,
     select_atm_iv,
 )
+from core.finnhub_provider import NewsHeadline
 from core.gemini_provider import GeminiResponseError, generate_structured
 from core.indicators import Candle
 from core.metrics import (
@@ -23,6 +26,7 @@ from core.metrics import (
     format_header,
 )
 from core.playbook_registry import Playbook, PlaybookKey
+from core.reference_edits import nearest_strikes
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from agent.prompts import SYNTHESIS_RESPONSE_SCHEMA, SYNTHESIS_SYSTEM_INSTRUCTION
@@ -57,6 +61,9 @@ class AnalysisResult(BaseModel):
     liquidity: Liquidity
     scenario_1sigma: Scenario | None
     scenario_2sigma: Scenario | None
+    news: list[NewsHeadline] = Field(default_factory=list)
+    news_source: Literal["finnhub"] | None = None
+    news_as_of: datetime | None = None
     detected_language: str
     disclaimer: str = DISCLAIMER
     source: Literal["cboe_delayed"] = "cboe_delayed"
@@ -65,75 +72,210 @@ class AnalysisResult(BaseModel):
     warnings: list[str]
 
 
-async def run_analysis(
+PositionResolver = Callable[
+    [list[CboeOptionQuote], datetime],
+    tuple[AnalysisPosition, PlaybookKey, Playbook],
+]
+
+
+async def run_analysis_events(
     *,
     client: httpx.AsyncClient,
     provider: CboeOptionsProvider,
-    position: AnalysisPosition,
-    playbook: Playbook,
-    strategy_key: PlaybookKey,
+    symbol: str,
+    expiration: date,
+    resolve_position: PositionResolver,
     intent: Literal["open", "close", "roll"],
     detected_language: str,
-    historical_candles: list[Candle] | None = None,
-) -> AnalysisResult:
-    symbol = position.legs[0].symbol
-    expiration = position.legs[0].expiration
+    history_loader: Callable[[], Awaitable[list[Candle] | None]],
+    news_loader: Callable[[], Awaitable[tuple[list[NewsHeadline], list[str]]]],
+    is_disconnected: Callable[[], Awaitable[bool]] | None = None,
+) -> AsyncGenerator[dict[str, object], None]:
+    history_task = asyncio.create_task(history_loader())
+    news_task = asyncio.create_task(news_loader())
+    synthesis_task: asyncio.Task[str] | None = None
+    try:
+        if await _disconnected(is_disconnected):
+            return
+        yield _stage("history", "started", "Loading price history for volatility context")
+        yield _stage("news", "started", "Loading recent headlines")
 
-    chain = await provider.get_chain(symbol, expiration)
-    market = await provider.get_market_quote(symbol)
-    quotes = [_quote_for(chain.contracts, leg) for leg in position.legs]
+        if await _disconnected(is_disconnected):
+            return
+        yield _stage("chain", "started", "Loading the option chain")
+        chain = await provider.get_chain(symbol, expiration)
+        yield _stage(
+            "chain",
+            "done",
+            f"{len(chain.contracts)} contracts for {expiration.isoformat()}",
+        )
+        for warning in chain.warnings:
+            yield {"type": "warning", "code": warning}
+        if chain.as_of is None:
+            raise ValueError(
+                "The option chain is unavailable for this symbol. "
+                "Please try again in a minute."
+            )
 
-    metrics = compute_metrics(
-        legs=quotes,
-        playbook=playbook,
-        underlying_price=market.price,
-        as_of=chain.as_of.date(),
-        atm_iv=select_atm_iv(chain.contracts, market.price, expiration),
-        historical_candles=historical_candles,
+        if await _disconnected(is_disconnected):
+            return
+        yield _stage("quote", "started", "Loading the underlying quote")
+        market = await provider.get_market_quote(symbol)
+        yield _stage(
+            "quote",
+            "done",
+            f"{market.symbol} {market.price:g}"
+            if market.price is not None
+            else "Quote unavailable",
+        )
+
+        position, strategy_key, playbook = resolve_position(
+            chain.contracts,
+            chain.as_of,
+        )
+        header = format_header(playbook.display_name, position.legs)
+        yield {
+            "type": "position",
+            "position": position.model_dump(mode="json"),
+            "header": header,
+        }
+
+        historical_candles = await history_task
+        yield _stage(
+            "history",
+            "done",
+            f"{len(historical_candles)} daily candles"
+            if historical_candles
+            else "History unavailable",
+        )
+
+        news, news_warnings = await news_task
+        news_as_of = _news_as_of(news)
+        yield _stage(
+            "news",
+            "done",
+            f"{len(news)} recent headlines" if news else "No recent headlines",
+        )
+        if news:
+            yield {
+                "type": "news",
+                "news": [headline.model_dump(mode="json") for headline in news],
+                "source": "finnhub",
+                "as_of": (
+                    news_as_of.isoformat().replace("+00:00", "Z")
+                    if news_as_of is not None
+                    else None
+                ),
+            }
+        for warning in news_warnings:
+            yield {"type": "warning", "code": warning}
+
+        if await _disconnected(is_disconnected):
+            return
+        yield _stage("metrics", "started", "Calculating position metrics")
+        quotes = [quote_for(chain.contracts, leg) for leg in position.legs]
+        metrics = compute_metrics(
+            legs=quotes,
+            playbook=playbook,
+            underlying_price=market.price,
+            as_of=chain.as_of.date(),
+            atm_iv=select_atm_iv(chain.contracts, market.price, expiration),
+            historical_candles=historical_candles,
+        )
+        yield _stage("metrics", "done", header)
+
+        if await _disconnected(is_disconnected):
+            return
+        yield _stage("synthesis", "started", "Writing the assessment")
+        synthesis_task = asyncio.create_task(
+            synthesize(
+                client,
+                playbook=playbook,
+                position=position,
+                header=header,
+                metrics=metrics,
+                market_price=market.price,
+                change_pct=market.change_pct,
+                intent=intent,
+                detected_language=detected_language,
+                news=news,
+            )
+        )
+        while not synthesis_task.done():
+            done, _ = await asyncio.wait({synthesis_task}, timeout=10)
+            if done:
+                break
+            if await _disconnected(is_disconnected):
+                synthesis_task.cancel()
+                return
+            yield {"type": "heartbeat"}
+        recommendation = synthesis_task.result()
+        yield _stage("synthesis", "done", "Assessment ready")
+
+        warnings = [*metrics.warnings, *chain.warnings, *news_warnings]
+        result = AnalysisResult(
+            strategy_key=strategy_key,
+            intent=intent,
+            header=header,
+            recommendation=recommendation,
+            probability_positive=metrics.probability_positive,
+            max_profit=metrics.max_profit,
+            max_loss=metrics.max_loss,
+            net_credit_debit=metrics.net_credit_debit,
+            breakeven=metrics.breakeven,
+            theta_daily=metrics.theta_daily,
+            iv_rank=metrics.iv_rank,
+            current_iv=metrics.current_iv,
+            hv_20d=metrics.hv_20d,
+            hv_60d=metrics.hv_60d,
+            hv_rank=metrics.hv_rank,
+            iv_hv_ratio=metrics.iv_hv_ratio,
+            event_flags=metrics.event_flags,
+            liquidity=metrics.liquidity,
+            scenario_1sigma=metrics.scenario_1sigma,
+            scenario_2sigma=metrics.scenario_2sigma,
+            news=news,
+            news_source="finnhub" if news else None,
+            news_as_of=news_as_of,
+            detected_language=detected_language,
+            as_of=chain.as_of,
+            degraded=bool(warnings),
+            warnings=warnings,
+        )
+        yield {"type": "result", "result": result.model_dump(mode="json")}
+    finally:
+        for task in (history_task, news_task, synthesis_task):
+            if task is not None and not task.done():
+                task.cancel()
+
+
+def _stage(identifier: str, status: str, label: str) -> dict[str, object]:
+    return {
+        "type": "stage",
+        "id": identifier,
+        "status": status,
+        "label": label,
+    }
+
+
+async def _disconnected(
+    is_disconnected: Callable[[], Awaitable[bool]] | None,
+) -> bool:
+    return bool(is_disconnected is not None and await is_disconnected())
+
+
+def _news_as_of(news: list[NewsHeadline]) -> datetime | None:
+    return max(
+        (
+            headline.published_at
+            for headline in news
+            if headline.published_at is not None
+        ),
+        default=None,
     )
-    header = format_header(playbook.display_name, position.legs)
-    recommendation = await _synthesize(
-        client,
-        playbook=playbook,
-        position=position,
-        header=header,
-        metrics=metrics,
-        market_price=market.price,
-        change_pct=market.change_pct,
-        intent=intent,
-        detected_language=detected_language,
-    )
-
-    warnings = [*metrics.warnings, *chain.warnings]
-    return AnalysisResult(
-        strategy_key=strategy_key,
-        intent=intent,
-        header=header,
-        recommendation=recommendation,
-        probability_positive=metrics.probability_positive,
-        max_profit=metrics.max_profit,
-        max_loss=metrics.max_loss,
-        net_credit_debit=metrics.net_credit_debit,
-        breakeven=metrics.breakeven,
-        theta_daily=metrics.theta_daily,
-        iv_rank=metrics.iv_rank,
-        current_iv=metrics.current_iv,
-        hv_20d=metrics.hv_20d,
-        hv_60d=metrics.hv_60d,
-        hv_rank=metrics.hv_rank,
-        iv_hv_ratio=metrics.iv_hv_ratio,
-        event_flags=metrics.event_flags,
-        liquidity=metrics.liquidity,
-        scenario_1sigma=metrics.scenario_1sigma,
-        scenario_2sigma=metrics.scenario_2sigma,
-        detected_language=detected_language,
-        as_of=chain.as_of,
-        degraded=bool(warnings),
-        warnings=warnings,
-    )
 
 
-def _quote_for(contracts: list[CboeOptionQuote], leg: OptionLeg) -> LegQuote:
+def quote_for(contracts: list[CboeOptionQuote], leg: OptionLeg) -> LegQuote:
     for contract in contracts:
         parsed = parse_occ_symbol(contract.option)
         if parsed is None:
@@ -158,15 +300,28 @@ def _quote_for(contracts: list[CboeOptionQuote], leg: OptionLeg) -> LegQuote:
             open_interest=contract.open_interest,
             volume=contract.volume,
         )
+    nearby = nearest_strikes(
+        contracts,
+        leg.option_type,
+        leg.expiration,
+        leg.strike,
+    )
+    hint = (
+        " Nearby listed strikes: "
+        + ", ".join(f"{value:g}" for value in nearby)
+        + "."
+        if nearby
+        else ""
+    )
     raise ValueError(
         "No listed contract matches "
         f"{leg.symbol} {leg.option_type} {leg.strike:g} expiring "
         f"{leg.expiration.isoformat()}. Check the strike and expiration, "
-        "or send a new description."
+        f"or send a new description.{hint}"
     )
 
 
-async def _synthesize(
+async def synthesize(
     client: httpx.AsyncClient,
     *,
     playbook: Playbook,
@@ -177,6 +332,7 @@ async def _synthesize(
     change_pct: float | None,
     intent: str,
     detected_language: str,
+    news: list[NewsHeadline] | None = None,
 ) -> str:
     metric_facts = metrics.model_dump(mode="json")
     metric_facts.pop("iv_rank", None)
@@ -196,6 +352,18 @@ async def _synthesize(
             "underlying_price": market_price,
             "change_pct": change_pct,
         },
+        "recent_news": [
+            {
+                "title": headline.title,
+                "publisher": headline.publisher,
+                "published_at": (
+                    headline.published_at.isoformat()
+                    if headline.published_at is not None
+                    else None
+                ),
+            }
+            for headline in (news or [])
+        ],
     }
     decoded = await generate_structured(
         client,
