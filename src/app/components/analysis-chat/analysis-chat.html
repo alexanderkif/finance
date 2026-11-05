@@ -53,12 +53,74 @@
           @if (message.analysis; as result) {
             <app-analysis-card [result]="result" />
           } @else {
-            <p>{{ message.text }}</p>
+            @if (message.text) {
+              <p>{{ message.text }}</p>
+            }
+          }
+          @if (message.position; as position) {
+            <div
+              class="position-summary"
+              [class.position-summary-provisional]="position.provisional"
+              role="status"
+            >
+              <span class="position-label">
+                {{ position.provisional ? 'Understood' : 'Position' }}
+              </span>
+              <strong>{{ position.header }}</strong>
+              @if (!position.provisional) {
+                <ul class="position-legs" aria-label="Position legs">
+                  @for (leg of position.legs; track $index) {
+                    <li>
+                      {{ leg.side ?? '—' }}
+                      {{ leg.strike ?? '—' }}
+                      {{ leg.option_type ?? '—' }}
+                      {{ leg.expiration ?? '—' }}
+                    </li>
+                  }
+                </ul>
+              }
+              @if (position.provisional) {
+                <span class="position-note">Resolving listed strikes…</span>
+              }
+            </div>
+          }
+          @if (message.activities?.length) {
+            <ol class="activity-timeline" aria-label="Analysis progress">
+              @for (activity of message.activities; track activity.id) {
+                <li
+                  class="activity"
+                  [class.activity-running]="activity.state === 'running'"
+                  [class.activity-done]="activity.state === 'done'"
+                  [class.activity-failed]="activity.state === 'failed'"
+                >
+                  <span class="activity-marker" aria-hidden="true"></span>
+                  <span class="activity-label">{{ activity.label }}</span>
+                  <span class="visually-hidden">{{ activity.state }}</span>
+                  @if (activity.detail) {
+                    <span class="activity-detail">{{ activity.detail }}</span>
+                  }
+                </li>
+              }
+            </ol>
+          }
+          @if (message.news?.length) {
+            <div class="news-context">
+              <span class="news-caption">Recent headlines (context, not a calendar)</span>
+              <ul>
+                @for (headline of message.news; track headline.url) {
+                  <li>
+                    <a [href]="headline.url" target="_blank" rel="noopener noreferrer">
+                      {{ headline.title }}
+                    </a>
+                    @if (headline.publisher) {
+                      <span class="news-publisher">{{ headline.publisher }}</span>
+                    }
+                  </li>
+                }
+              </ul>
+            </div>
           }
         </article>
-      }
-      @if (busy()) {
-        <p class="thinking" role="status">{{ status() ?? 'Working…' }}</p>
       }
     </div>
 

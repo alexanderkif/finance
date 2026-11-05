@@ -109,8 +109,22 @@ change.
 - Append an `AnalysisCard` component inline for every successful answer instead
   of a "card updated" bubble, so earlier analyses stay visible for comparison.
   Do not repeat the card's recommendation in a separate chat bubble.
+- Replace the single `Working…` line with an ordered activity timeline attached
+  to the user turn. Render only events streamed from the API; never derive
+  progress from a client timer. Show each step's state and any retry, warning,
+  or failure detail.
+- Show the interpreted position immediately after `parse`, before analysis
+  finishes. For a reference edit, mark it provisional until the stream emits
+  the resolved listed legs and header.
+- Keep the last complete parsed positions on the client only and send them as
+  `context` to `parse` and `run`; add no server-side user state. A reference
+  request without context asks for the full position.
 - The chat collects the intent (open, close, roll) separately from parsing,
-  sends it to the API, and shows it as a badge on each analysis card.
+  sends it to the API, and shows it as a badge on each analysis card. Intent is
+  never inferred from the message or the example text.
+- Show streamed recent headlines as ticker context with links, captioned as
+  context and not a live calendar. Do not present them as dividend or earnings
+  dates.
 - The analysis card shows API volatility context (`current_iv`, `hv_20d`,
   `hv_60d`, `hv_rank`, `iv_hv_ratio`) and both `scenario_1sigma` and
   `scenario_2sigma`. Label `hv_rank` as an HV percentile, not an IV rank.
@@ -122,9 +136,11 @@ change.
   request.
 - User messages offer an edit-in-input icon button that copies the message text
   back to the textarea. Enter sends; Shift+Enter inserts a new line.
-- The chat retries transient service failures, says which service is
-  unavailable between attempts, and offers a Cancel button. Sending a new
-  message cancels the previous request chain.
+- The chat streams `/api/analysis/run/stream` as NDJSON through `fetch`, because
+  Angular `HttpClient` does not expose incremental response bodies. Retry
+  transient service failures, say which service is unavailable between
+  attempts, and offer a Cancel button. Sending a new message aborts the stream
+  and suppresses stale events.
 - After a non-validation failure, offer "Retry failed step": retry parsing if
   extraction failed, or only the analysis step with the already parsed position
   if analysis failed. Do not resend the user message or repeat extraction when

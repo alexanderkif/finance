@@ -32,6 +32,7 @@ const completePosition: ParseResponse = {
   ],
   missing_fields: [],
   detected_language: 'English',
+  header: 'Long Call XSP 600 2030-11-15',
 };
 
 const analysisStub: AnalysisResult = {
@@ -72,6 +73,9 @@ const analysisStub: AnalysisResult = {
     days_to_expiration: 30,
     atm_iv: 0.18,
   },
+  news: [],
+  news_source: null,
+  news_as_of: null,
   detected_language: 'English',
   disclaimer: 'Educational analysis, not investment advice.',
   source: 'cboe_delayed',
@@ -95,21 +99,30 @@ function pendingUntilAborted(signal?: AbortSignal): Promise<ParseResponse> {
   });
 }
 
+function pendingAnalysis(signal?: AbortSignal): Promise<AnalysisResult> {
+  return new Promise((_resolve, reject) => {
+    signal?.addEventListener('abort', () => {
+      reject(new DOMException('The request was cancelled.', 'AbortError'));
+    });
+  });
+}
+
 describe('AnalysisChat', () => {
   async function setup(): Promise<{
     fixture: ComponentFixture<AnalysisChat>;
     compiled: HTMLElement;
     parse: ReturnType<typeof vi.fn>;
-    runAnalysis: ReturnType<typeof vi.fn>;
+    streamAnalysis: ReturnType<typeof vi.fn>;
   }> {
     localStorage.clear();
-    const parse = vi.fn((_message: string, _symbol: string, signal?: AbortSignal) =>
-      pendingUntilAborted(signal),
+    const parse = vi.fn(
+      (_message: string, _symbol: string, signal?: AbortSignal, _context?: unknown) =>
+        pendingUntilAborted(signal),
     );
-    const runAnalysis = vi.fn();
+    const streamAnalysis = vi.fn();
     const api = {
       parse,
-      runAnalysis,
+      streamAnalysis,
       getExample: vi.fn(),
     };
     await TestBed.configureTestingModule({
@@ -124,7 +137,7 @@ describe('AnalysisChat', () => {
       fixture,
       compiled: fixture.nativeElement as HTMLElement,
       parse,
-      runAnalysis,
+      streamAnalysis,
     };
   }
 
@@ -158,14 +171,17 @@ describe('AnalysisChat', () => {
     typeMessage(compiled, 'buy call XSP 600');
     submit(fixture, compiled);
 
-    expect(compiled.querySelector('.thinking')?.textContent).toContain('Working');
+    expect(compiled.querySelector('.activity-timeline')?.textContent).toContain(
+      'Interpreting your request',
+    );
 
     button(compiled, 'Cancel')!.click();
     fixture.detectChanges();
 
     const signal = parse.mock.calls[0]?.[2] as AbortSignal;
     expect(signal.aborted).toBe(true);
-    expect(compiled.querySelector('.thinking')).toBeNull();
+    expect(compiled.querySelector('.activity-running')).toBeNull();
+    expect(compiled.querySelector('.activity-timeline')?.textContent).toContain('Cancelled');
     expect(button(compiled, 'Cancel')).toBeUndefined();
   });
 
@@ -227,22 +243,22 @@ describe('AnalysisChat', () => {
     fixture.detectChanges();
 
     expect(parse).toHaveBeenCalledTimes(1);
-    expect(compiled.querySelector('.thinking')).not.toBeNull();
+    expect(compiled.querySelector('.activity-timeline')).not.toBeNull();
 
     button(compiled, 'Cancel')!.click();
   });
 
   it('retries the analysis step without parsing or repeating the message', async () => {
-    const { fixture, compiled, parse, runAnalysis } = await setup();
+    const { fixture, compiled, parse, streamAnalysis } = await setup();
     parse.mockResolvedValue(completePosition);
-    runAnalysis.mockRejectedValueOnce(quotaError).mockResolvedValue(analysisStub);
+    streamAnalysis.mockRejectedValueOnce(quotaError).mockResolvedValue(analysisStub);
 
     typeMessage(compiled, 'buy call XSP 600 2030-11-15');
     submit(fixture, compiled);
     await settle(fixture);
 
     expect(parse).toHaveBeenCalledTimes(1);
-    expect(runAnalysis).toHaveBeenCalledTimes(1);
+    expect(streamAnalysis).toHaveBeenCalledTimes(1);
     expect(compiled.querySelectorAll('.message-user')).toHaveLength(1);
     expect(compiled.querySelector('.error')?.textContent).toContain('quota');
 
@@ -250,7 +266,7 @@ describe('AnalysisChat', () => {
     await settle(fixture);
 
     expect(parse).toHaveBeenCalledTimes(1);
-    expect(runAnalysis).toHaveBeenCalledTimes(2);
+    expect(streamAnalysis).toHaveBeenCalledTimes(2);
     expect(compiled.querySelectorAll('.message-user')).toHaveLength(1);
     expect(compiled.querySelector('.error')).toBeNull();
     const card = compiled.querySelector('.analysis-card');
@@ -261,24 +277,145 @@ describe('AnalysisChat', () => {
   });
 
   it('retries parsing when that step failed', async () => {
-    const { fixture, compiled, parse, runAnalysis } = await setup();
+    const { fixture, compiled, parse, streamAnalysis } = await setup();
     parse.mockRejectedValueOnce(quotaError).mockResolvedValue(completePosition);
-    runAnalysis.mockResolvedValue(analysisStub);
+    streamAnalysis.mockResolvedValue(analysisStub);
 
     typeMessage(compiled, 'buy call XSP 600 2030-11-15');
     submit(fixture, compiled);
     await settle(fixture);
 
     expect(parse).toHaveBeenCalledTimes(1);
-    expect(runAnalysis).not.toHaveBeenCalled();
+    expect(streamAnalysis).not.toHaveBeenCalled();
 
     button(compiled, 'Retry failed step')!.click();
     await settle(fixture);
 
     expect(parse).toHaveBeenCalledTimes(2);
     expect(parse.mock.calls[0]?.[0]).toBe(parse.mock.calls[1]?.[0]);
-    expect(runAnalysis).toHaveBeenCalledTimes(1);
+    expect(streamAnalysis).toHaveBeenCalledTimes(1);
     expect(compiled.querySelectorAll('.message-user')).toHaveLength(1);
+  });
+
+  it('shows the interpreted position before the analysis finishes', async () => {
+    const { fixture, compiled, parse, streamAnalysis } = await setup();
+    parse.mockResolvedValue(completePosition);
+    streamAnalysis.mockImplementation((_request, _onEvent, signal) => pendingAnalysis(signal));
+
+    typeMessage(compiled, 'buy call XSP 600 2030-11-15');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    expect(compiled.querySelector('.position-summary')?.textContent).toContain(
+      'Long Call XSP 600 2030-11-15',
+    );
+    expect(compiled.querySelector('.position-legs')?.textContent).toContain('600');
+
+    button(compiled, 'Cancel')!.click();
+  });
+
+  it('sends previous positions as context for a follow-up', async () => {
+    const { fixture, compiled, parse, streamAnalysis } = await setup();
+    parse.mockResolvedValue(completePosition);
+    streamAnalysis.mockResolvedValue(analysisStub);
+
+    typeMessage(compiled, 'buy call XSP 600 2030-11-15');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    typeMessage(compiled, 'shift it two strikes up');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    expect(parse).toHaveBeenCalledTimes(2);
+    const context = parse.mock.calls[1]?.[3] as unknown[];
+    expect(context).toHaveLength(1);
+    expect(JSON.stringify(context[0])).toContain('600');
+  });
+
+  it('renders streamed stage updates in the activity timeline', async () => {
+    const { fixture, compiled, parse, streamAnalysis } = await setup();
+    parse.mockResolvedValue(completePosition);
+    streamAnalysis.mockImplementation(
+      async (_request: unknown, onEvent: (event: unknown) => void) => {
+        onEvent({
+          type: 'stage',
+          id: 'chain',
+          status: 'started',
+          label: 'Loading the option chain',
+        });
+        onEvent({
+          type: 'stage',
+          id: 'chain',
+          status: 'done',
+          label: 'Loading the option chain',
+          detail: '12 contracts',
+        });
+        return analysisStub;
+      },
+    );
+
+    typeMessage(compiled, 'buy call XSP 600 2030-11-15');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    const timeline = compiled.querySelector('.activity-timeline');
+    expect(timeline?.textContent).toContain('Loading the option chain');
+    expect(timeline?.textContent).toContain('12 contracts');
+    expect(compiled.querySelector('.activity-running')).toBeNull();
+  });
+
+  it('renders recent headlines from the analysis stream', async () => {
+    const { fixture, compiled, parse, streamAnalysis } = await setup();
+    parse.mockResolvedValue(completePosition);
+    streamAnalysis.mockImplementation(
+      async (_request: unknown, onEvent: (event: unknown) => void) => {
+        onEvent({
+          type: 'news',
+          news: [
+            {
+              title: 'SPY edges higher as breadth improves',
+              url: 'https://example.com/spy-news',
+              publisher: 'Newswire',
+              published_at: null,
+            },
+          ],
+          source: 'finnhub',
+          as_of: null,
+        });
+        return analysisStub;
+      },
+    );
+
+    typeMessage(compiled, 'buy call XSP 600 2030-11-15');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    expect(compiled.querySelector('.news-context a')?.getAttribute('href')).toBe(
+      'https://example.com/spy-news',
+    );
+    expect(compiled.querySelector('.news-context')?.textContent).toContain('not a calendar');
+  });
+
+  it('shows an unsupported parse refusal in the chat without a retry', async () => {
+    const { fixture, compiled, parse } = await setup();
+    parse.mockRejectedValue(
+      new HttpErrorResponse({
+        status: 422,
+        error: {
+          detail: 'I can only analyze one option or one two-leg vertical spread per message.',
+        },
+      }),
+    );
+
+    typeMessage(compiled, 'analyze SPY and QQQ');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    expect(compiled.querySelector('.chat-log')?.textContent).toContain(
+      'one two-leg vertical spread',
+    );
+    expect(button(compiled, 'Retry failed step')).toBeUndefined();
   });
 
   it('resizes the conversation with the keyboard and persists the height', async () => {

@@ -68,6 +68,9 @@ const analysisStub: AnalysisResult = {
   },
   scenario_1sigma: null,
   scenario_2sigma: null,
+  news: [],
+  news_source: null,
+  news_as_of: null,
   detected_language: 'English',
   disclaimer: 'Educational analysis, not investment advice.',
   source: 'cboe_delayed',
@@ -92,11 +95,11 @@ describe('App', () => {
       missing_fields: [],
       detected_language: 'English',
     }),
-    runAnalysis: async (): Promise<AnalysisResult> => analysisStub,
+    streamAnalysis: async (): Promise<AnalysisResult> => analysisStub,
     getExample: async (symbol: string) => ({
       symbol,
       message:
-        'Sell the 760 put and buy the 755 put on SPY expiring 2030-11-15 to open a defined-risk bull put spread.',
+        'Sell the 760 put and buy the 755 put on SPY expiring 2030-11-15 for a defined-risk bull put spread.',
       description:
         'SPY is near 770.00. This 760/755 put spread expires in 40 days and caps the loss at the strike width minus the credit received.',
       legs: [

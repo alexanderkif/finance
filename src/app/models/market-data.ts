@@ -74,6 +74,20 @@ export interface PositionLeg {
   expiration: string;
 }
 
+export interface AnalysisPosition {
+  position_type: 'single' | 'strategy';
+  legs: PositionLeg[];
+}
+
+export type ReferenceKind = 'same' | 'shift' | 'widen' | 'narrow' | 'expiration';
+
+export interface ReferenceEdit {
+  kind: ReferenceKind;
+  strikes: number | null;
+  direction: 'up' | 'down' | null;
+  expiration: string | null;
+}
+
 export interface ParsedLeg {
   symbol: string;
   side: OptionSide | null;
@@ -88,16 +102,68 @@ export interface ParseResponse {
   missing_fields: string[];
   detected_language: string;
   strategy_key?: string;
+  header?: string | null;
+  reference?: ReferenceEdit | null;
 }
 
 export interface AnalysisRequest {
-  position: {
-    position_type: 'single' | 'strategy';
-    legs: PositionLeg[];
-  };
+  position?: AnalysisPosition | null;
+  context?: AnalysisPosition[];
+  reference?: ReferenceEdit | null;
   intent: Intent;
   detected_language: string;
 }
+
+export interface AnalysisStageEvent {
+  type: 'stage';
+  id: string;
+  status: 'started' | 'done' | 'failed';
+  label: string;
+  detail?: string;
+}
+
+export interface AnalysisPositionEvent {
+  type: 'position';
+  position: AnalysisPosition;
+  header: string;
+}
+
+export interface AnalysisNewsEvent {
+  type: 'news';
+  news: NewsHeadline[];
+  source: 'finnhub' | null;
+  as_of: string | null;
+}
+
+export interface AnalysisWarningEvent {
+  type: 'warning';
+  code: string;
+  message?: string;
+}
+
+export interface AnalysisResultEvent {
+  type: 'result';
+  result: AnalysisResult;
+}
+
+export interface AnalysisErrorEvent {
+  type: 'error';
+  status: number;
+  detail: string;
+}
+
+export interface AnalysisHeartbeatEvent {
+  type: 'heartbeat';
+}
+
+export type AnalysisStreamEvent =
+  | AnalysisStageEvent
+  | AnalysisPositionEvent
+  | AnalysisNewsEvent
+  | AnalysisWarningEvent
+  | AnalysisResultEvent
+  | AnalysisErrorEvent
+  | AnalysisHeartbeatEvent;
 
 export interface ExampleResponse {
   symbol: string;
@@ -145,6 +211,9 @@ export interface AnalysisResult {
   liquidity: Liquidity;
   scenario_1sigma: Scenario | null;
   scenario_2sigma: Scenario | null;
+  news: NewsHeadline[];
+  news_source: 'finnhub' | null;
+  news_as_of: string | null;
   detected_language: string;
   disclaimer: string;
   source: 'cboe_delayed';

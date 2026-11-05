@@ -10,7 +10,17 @@ import {
   viewChild,
 } from '@angular/core';
 import { errorMessage, isRetryable } from '../../api-error';
-import { AnalysisResult, Intent, ParseResponse, PositionLeg } from '../../models/market-data';
+import {
+  AnalysisPosition,
+  AnalysisResult,
+  AnalysisStreamEvent,
+  Intent,
+  NewsHeadline,
+  ParseResponse,
+  ParsedLeg,
+  PositionLeg,
+  ReferenceEdit,
+} from '../../models/market-data';
 import { MarketApi, isAbortError, requestAbortedError } from '../../services/market-data';
 import {
   DEFAULT_CHAT_HEIGHT_PX,
@@ -19,27 +29,46 @@ import {
   Preferences,
   clampChatHeight,
 } from '../../services/preferences';
+import { warningLabel } from '../../warning-labels';
 import { AnalysisCard } from '../analysis-card/analysis-card';
 
+type ActivityState = 'running' | 'done' | 'failed';
+
+interface ChatActivity {
+  id: string;
+  label: string;
+  state: ActivityState;
+  detail?: string;
+}
+
+interface PositionSummary {
+  header: string;
+  legs: ParsedLeg[];
+  provisional: boolean;
+}
+
 interface ChatMessage {
+  id: number;
   role: 'user' | 'assistant';
   text?: string;
   analysis?: AnalysisResult;
-}
-
-interface PositionRequest {
-  position_type: 'single' | 'strategy';
-  legs: PositionLeg[];
+  activities?: ChatActivity[];
+  position?: PositionSummary;
+  news?: NewsHeadline[];
 }
 
 type RunAction = {
   kind: 'run';
+  turnId: number;
   parsed: ParseResponse;
-  position: PositionRequest;
+  position: AnalysisPosition | null;
+  context: AnalysisPosition[];
+  reference: ReferenceEdit | null;
   intent: Intent;
 };
 
-type RetryAction = { kind: 'example' } | { kind: 'parse'; combined: string } | RunAction;
+type RetryAction =
+  { kind: 'example' } | { kind: 'parse'; combined: string; turnId: number } | RunAction;
 
 const RETRY_DELAYS_MS = [1_200, 3_000] as const;
 const FIELD_PROMPTS: Record<string, string> = {
@@ -62,9 +91,13 @@ export class AnalysisChat {
   private readonly chatLog = viewChild<ElementRef<HTMLElement>>('chatLog');
   private readonly chatInput = viewChild<ElementRef<HTMLTextAreaElement>>('chatInput');
   private readonly scrollPinned = signal(true);
+  private readonly contextStack: AnalysisPosition[] = [];
   private resizeStart: { y: number; height: number } | null = null;
   private activeRequest: AbortController | null = null;
   private exampleRequest: AbortController | null = null;
+  private activeTurnId: number | null = null;
+  private nextMessageId = 1;
+  private retrySequence = 0;
 
   protected readonly chatHeight = this.preferences.chatHeight;
   protected readonly minChatHeight = MIN_CHAT_HEIGHT_PX;
@@ -75,6 +108,7 @@ export class AnalysisChat {
 
   protected readonly messages = signal<ChatMessage[]>([
     {
+      id: 0,
       role: 'assistant',
       text:
         'Describe a single option or a two-leg vertical spread. I will ask only ' +
@@ -86,18 +120,17 @@ export class AnalysisChat {
   protected readonly busy = signal(false);
   protected readonly exampleBusy = signal(false);
   protected readonly error = signal<string | null>(null);
-  protected readonly status = signal<string | null>(null);
   protected readonly pending = signal<{ text: string; missing: string[] } | null>(null);
   protected readonly retryable = signal<RetryAction | null>(null);
   protected readonly canSend = computed(() => this.draft().trim().length > 0);
   protected readonly errorMessage = errorMessage;
+  protected readonly warningLabel = warningLabel;
 
   constructor() {
     afterRenderEffect({
       mixedReadWrite: () => {
         this.messages();
         this.busy();
-        this.status();
         this.chatHeight();
         if (this.scrollPinned()) {
           this.scrollToLatest();
@@ -129,7 +162,6 @@ export class AnalysisChat {
     this.pending.set(null);
     this.error.set(null);
     this.retryable.set(null);
-    this.status.set(null);
     this.chatInput()?.nativeElement.focus();
   }
 
@@ -214,13 +246,14 @@ export class AnalysisChat {
   }
 
   protected cancel(): void {
+    this.cancelRunningActivities();
     this.activeRequest?.abort();
     this.exampleRequest?.abort();
     this.activeRequest = null;
     this.exampleRequest = null;
+    this.activeTurnId = null;
     this.busy.set(false);
     this.exampleBusy.set(false);
-    this.status.set(null);
     this.error.set(null);
     this.retryable.set(null);
   }
@@ -237,11 +270,13 @@ export class AnalysisChat {
     }
 
     const controller = this.startChatRequest();
+    this.activeTurnId = action.turnId;
     this.busy.set(true);
     try {
       if (action.kind === 'parse') {
-        await this.parseAndAnalyze(controller, action.combined);
+        await this.parseAndAnalyze(controller, action.combined, action.turnId);
       } else {
+        this.resetActivities(action.turnId);
         await this.runAnalysisStage(controller, action);
       }
     } finally {
@@ -253,6 +288,7 @@ export class AnalysisChat {
     if (this.exampleBusy()) {
       return;
     }
+    this.cancelRunningActivities();
     this.activeRequest?.abort();
     this.activeRequest = null;
     this.busy.set(false);
@@ -261,7 +297,6 @@ export class AnalysisChat {
     this.exampleRequest = controller;
     this.exampleBusy.set(true);
     this.error.set(null);
-    this.status.set(null);
     this.retryable.set(null);
     try {
       const example = await this.withRetry(
@@ -283,9 +318,6 @@ export class AnalysisChat {
       if (this.exampleRequest === controller) {
         this.exampleRequest = null;
         this.exampleBusy.set(false);
-        if (!this.activeRequest) {
-          this.status.set(null);
-        }
       }
     }
   }
@@ -297,12 +329,17 @@ export class AnalysisChat {
       return;
     }
     const combined = this.pending() ? `${this.pending()!.text} ${text}` : text;
+    const turnId = this.nextMessageId++;
     const controller = this.startChatRequest();
+    this.activeTurnId = turnId;
     this.draft.set('');
-    this.messages.update((messages) => [...messages, { role: 'user', text }]);
+    this.messages.update((messages) => [
+      ...messages,
+      { id: turnId, role: 'user', text, activities: [] },
+    ]);
     this.busy.set(true);
     try {
-      await this.parseAndAnalyze(controller, combined);
+      await this.parseAndAnalyze(controller, combined, turnId);
     } finally {
       this.finishChat(controller);
     }
@@ -310,11 +347,11 @@ export class AnalysisChat {
 
   private startChatRequest(): AbortController {
     const controller = new AbortController();
+    this.cancelRunningActivities();
     this.activeRequest?.abort();
     this.exampleRequest?.abort();
     this.activeRequest = controller;
     this.error.set(null);
-    this.status.set(null);
     this.retryable.set(null);
     return controller;
   }
@@ -322,31 +359,50 @@ export class AnalysisChat {
   private finishChat(controller: AbortController): void {
     if (this.activeRequest === controller) {
       this.activeRequest = null;
+      this.activeTurnId = null;
       this.busy.set(false);
-      this.status.set(null);
     }
   }
 
-  private async parseAndAnalyze(controller: AbortController, combined: string): Promise<void> {
+  private async parseAndAnalyze(
+    controller: AbortController,
+    combined: string,
+    turnId: number,
+  ): Promise<void> {
+    this.upsertActivity(turnId, 'parse', 'Interpreting your request', 'running');
     let parsed: ParseResponse;
     try {
       parsed = await this.withRetry(
-        (signal) => this.api.parse(combined, this.symbol(), signal),
+        (signal) => this.api.parse(combined, this.symbol(), signal, [...this.contextStack]),
         controller.signal,
         'The analysis service',
+        (message) => this.addRetryActivity(turnId, message),
       );
     } catch (error) {
-      this.handleChatFailure(controller, error, { kind: 'parse', combined });
+      this.markRunningActivitiesFailed(turnId);
+      this.handleChatFailure(controller, error, { kind: 'parse', combined, turnId });
       return;
     }
     if (controller.signal.aborted) {
       return;
     }
+    this.upsertActivity(
+      turnId,
+      'parse',
+      'Interpreting your request',
+      'done',
+      parsed.header ?? undefined,
+    );
+    this.updateTurn(turnId, (message) => ({
+      ...message,
+      position: this.positionSummary(parsed),
+    }));
     if (parsed.missing_fields.length > 0) {
       this.pending.set({ text: combined, missing: parsed.missing_fields });
       this.messages.update((messages) => [
         ...messages,
         {
+          id: this.nextMessageId++,
           role: 'assistant',
           text: this.missingFieldsPrompt(parsed.missing_fields),
         },
@@ -355,10 +411,12 @@ export class AnalysisChat {
     }
     this.pending.set(null);
     const position = this.toPosition(parsed);
-    if (!position) {
+    const reference = parsed.reference ?? null;
+    if (!position && !reference) {
       this.messages.update((messages) => [
         ...messages,
         {
+          id: this.nextMessageId++,
           role: 'assistant',
           text:
             'I could not build a complete position from that message. ' +
@@ -367,36 +425,106 @@ export class AnalysisChat {
       ]);
       return;
     }
+    const context = [...this.contextStack];
+    if (reference && context.length === 0) {
+      this.messages.update((messages) => [
+        ...messages,
+        {
+          id: this.nextMessageId++,
+          role: 'assistant',
+          text:
+            'I need the previous position before I can apply that change. ' +
+            'Please describe the full position.',
+        },
+      ]);
+      return;
+    }
+    if (!reference && position) {
+      this.addContext(position);
+    }
     await this.runAnalysisStage(controller, {
       kind: 'run',
+      turnId,
       parsed,
       position,
+      context,
+      reference,
       intent: this.intent(),
     });
   }
 
   private async runAnalysisStage(controller: AbortController, action: RunAction): Promise<void> {
+    this.upsertActivity(action.turnId, 'request', 'Contacting the analysis service', 'running');
     try {
       const result = await this.withRetry(
         (signal) =>
-          this.api.runAnalysis(
+          this.api.streamAnalysis(
             {
-              position: action.position,
+              position: action.reference ? null : action.position,
+              context: action.context,
+              reference: action.reference,
               intent: action.intent,
               detected_language: action.parsed.detected_language,
             },
+            (event) => this.handleStreamEvent(action.turnId, event),
             signal,
           ),
         controller.signal,
         'The analysis service',
+        (message) => this.addRetryActivity(action.turnId, message),
       );
       if (controller.signal.aborted) {
         return;
       }
+      this.completeRunningActivities(action.turnId);
       this.retryable.set(null);
-      this.messages.update((messages) => [...messages, { role: 'assistant', analysis: result }]);
+      this.messages.update((messages) => [
+        ...messages,
+        { id: this.nextMessageId++, role: 'assistant', analysis: result },
+      ]);
     } catch (error) {
+      this.markRunningActivitiesFailed(action.turnId);
       this.handleChatFailure(controller, error, action);
+    }
+  }
+
+  private handleStreamEvent(turnId: number, event: AnalysisStreamEvent): void {
+    if (turnId !== this.activeTurnId) {
+      return;
+    }
+    switch (event.type) {
+      case 'stage':
+        this.upsertActivity(
+          turnId,
+          event.id,
+          event.label,
+          event.status === 'started' ? 'running' : event.status === 'done' ? 'done' : 'failed',
+          event.detail,
+        );
+        break;
+      case 'position':
+        this.addContext(event.position);
+        this.updateTurn(turnId, (message) => ({
+          ...message,
+          position: {
+            header: event.header,
+            legs: event.position.legs,
+            provisional: false,
+          },
+        }));
+        break;
+      case 'news':
+        this.updateTurn(turnId, (message) => ({ ...message, news: event.news }));
+        break;
+      case 'warning':
+        this.upsertActivity(turnId, `warning-${event.code}`, this.warningLabel(event.code), 'done');
+        break;
+      case 'error':
+        this.upsertActivity(turnId, 'stream-error', 'Analysis failed', 'failed', event.detail);
+        break;
+      case 'heartbeat':
+      case 'result':
+        break;
     }
   }
 
@@ -408,17 +536,29 @@ export class AnalysisChat {
     if (controller.signal.aborted || isAbortError(error)) {
       return;
     }
-    if (action.kind === 'run' && error instanceof HttpErrorResponse && error.status === 422) {
-      this.messages.update((messages) => [
-        ...messages,
-        {
-          role: 'assistant',
-          text:
-            'I need a complete, listed position before I can analyse it. ' +
-            'Please check the side, strike, and expiration, then send the ' +
-            'corrected description.',
-        },
-      ]);
+    if (error instanceof HttpErrorResponse && error.status === 422) {
+      if (action.kind === 'run') {
+        this.messages.update((messages) => [
+          ...messages,
+          {
+            id: this.nextMessageId++,
+            role: 'assistant',
+            text:
+              'I need a complete, listed position before I can analyse it. ' +
+              'Please check the side, strike, and expiration, then send the ' +
+              'corrected description.',
+          },
+        ]);
+      } else if (action.kind === 'parse') {
+        this.messages.update((messages) => [
+          ...messages,
+          {
+            id: this.nextMessageId++,
+            role: 'assistant',
+            text: this.errorMessage(error),
+          },
+        ]);
+      }
     }
     this.error.set(this.errorMessage(error));
     this.retryable.set(this.canRetryAfter(error) ? action : null);
@@ -447,6 +587,7 @@ export class AnalysisChat {
     request: (signal: AbortSignal) => Promise<T>,
     signal: AbortSignal,
     label: string,
+    onRetry?: (message: string) => void,
   ): Promise<T> {
     for (let attempt = 0; ; attempt += 1) {
       try {
@@ -456,10 +597,10 @@ export class AnalysisChat {
           throw error;
         }
         const delay = RETRY_DELAYS_MS[attempt];
-        this.status.set(
+        const message =
           `${label} is unavailable. Retrying in ${this.formatSeconds(delay)} ` +
-            `(attempt ${attempt + 2} of ${RETRY_DELAYS_MS.length + 1})…`,
-        );
+          `(attempt ${attempt + 2} of ${RETRY_DELAYS_MS.length + 1})…`;
+        onRetry?.(message);
         await this.wait(delay, signal);
       }
     }
@@ -494,7 +635,7 @@ export class AnalysisChat {
     }
   }
 
-  private toPosition(parsed: ParseResponse): PositionRequest | null {
+  private toPosition(parsed: ParseResponse): AnalysisPosition | null {
     const legs: PositionLeg[] = [];
     for (const leg of parsed.legs) {
       if (!leg.symbol || !leg.side || !leg.option_type || leg.strike === null || !leg.expiration) {
@@ -509,5 +650,137 @@ export class AnalysisChat {
       });
     }
     return { position_type: parsed.position_type, legs };
+  }
+
+  private addContext(position: AnalysisPosition): void {
+    const key = JSON.stringify(position.legs);
+    if (this.contextStack.some((item) => JSON.stringify(item.legs) === key)) {
+      return;
+    }
+    this.contextStack.push(position);
+    if (this.contextStack.length > 3) {
+      this.contextStack.shift();
+    }
+  }
+
+  private positionSummary(parsed: ParseResponse): PositionSummary {
+    if (parsed.reference) {
+      return {
+        header: this.referenceLabel(parsed.reference),
+        legs: parsed.legs,
+        provisional: true,
+      };
+    }
+    return {
+      header: parsed.header ?? this.fallbackHeader(parsed),
+      legs: parsed.legs,
+      provisional: false,
+    };
+  }
+
+  private fallbackHeader(parsed: ParseResponse): string {
+    if (parsed.strategy_key) {
+      return parsed.strategy_key
+        .split('_')
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(' ');
+    }
+    return parsed.position_type === 'single' ? 'Single option' : 'Two-leg position';
+  }
+
+  private referenceLabel(reference: ReferenceEdit): string {
+    const count = reference.strikes ?? 0;
+    const strikes = `${count} strike${count === 1 ? '' : 's'}`;
+    switch (reference.kind) {
+      case 'same':
+        return 'Same position as the previous request';
+      case 'shift':
+        return `Same position, shifted ${strikes} ${reference.direction ?? 'up'}`;
+      case 'widen':
+        return `Same position, widened by ${strikes}`;
+      case 'narrow':
+        return `Same position, narrowed by ${strikes}`;
+      case 'expiration':
+        return `Same position, expiring ${reference.expiration ?? 'later'}`;
+      default:
+        return 'Same position as the previous request';
+    }
+  }
+
+  private updateTurn(turnId: number, update: (message: ChatMessage) => ChatMessage): void {
+    this.messages.update((messages) =>
+      messages.map((message) => (message.id === turnId ? update(message) : message)),
+    );
+  }
+
+  private upsertActivity(
+    turnId: number,
+    id: string,
+    label: string,
+    state: ActivityState,
+    detail?: string,
+  ): void {
+    this.updateTurn(turnId, (message) => {
+      const activities = [...(message.activities ?? [])];
+      const index = activities.findIndex((activity) => activity.id === id);
+      const activity: ChatActivity = { id, label, state, detail };
+      if (index >= 0) {
+        activities[index] = activity;
+      } else {
+        activities.push(activity);
+      }
+      return { ...message, activities };
+    });
+  }
+
+  private addRetryActivity(turnId: number, label: string): void {
+    this.retrySequence += 1;
+    this.upsertActivity(turnId, `retry-${this.retrySequence}`, label, 'running');
+  }
+
+  private completeRunningActivities(turnId: number): void {
+    this.updateTurn(turnId, (message) => ({
+      ...message,
+      activities: message.activities?.map((activity) =>
+        activity.state === 'running' ? { ...activity, state: 'done' } : activity,
+      ),
+    }));
+  }
+
+  private markRunningActivitiesFailed(turnId: number): void {
+    this.updateTurn(turnId, (message) => ({
+      ...message,
+      activities: message.activities?.map((activity) =>
+        activity.state === 'running'
+          ? { ...activity, state: 'failed', detail: activity.detail ?? 'Failed' }
+          : activity,
+      ),
+    }));
+  }
+
+  private cancelRunningActivities(): void {
+    this.messages.update((messages) =>
+      messages.map((message) => {
+        if (!message.activities?.some((activity) => activity.state === 'running')) {
+          return message;
+        }
+        return {
+          ...message,
+          activities: message.activities.map((activity) =>
+            activity.state === 'running'
+              ? { ...activity, state: 'failed', detail: 'Cancelled' }
+              : activity,
+          ),
+        };
+      }),
+    );
+  }
+
+  private resetActivities(turnId: number): void {
+    this.updateTurn(turnId, (message) => ({
+      ...message,
+      activities: [],
+      news: undefined,
+    }));
   }
 }

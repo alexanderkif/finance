@@ -153,10 +153,138 @@
   line-height: 1.5;
 }
 
-.thinking {
-  margin: 0;
+.position-summary {
+  display: grid;
+  gap: 0.2rem;
+  margin-top: 0.55rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.position-summary-provisional {
+  border-left-style: dashed;
+}
+
+.position-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
   color: var(--text-muted);
-  font-size: 0.85rem;
+}
+
+.position-legs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.position-note {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+.activity-timeline {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: baseline;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.activity-marker {
+  flex: 0 0 auto;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.activity-running .activity-marker {
+  background: var(--accent);
+  animation: activity-pulse 1.2s ease-in-out infinite;
+}
+
+.activity-done .activity-marker {
+  background: var(--positive);
+}
+
+.activity-failed {
+  color: var(--danger-text);
+}
+
+.activity-failed .activity-marker {
+  background: var(--danger);
+}
+
+.activity-label {
+  color: inherit;
+}
+
+.activity-detail {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+@keyframes activity-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.news-context {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.55rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.news-caption {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.news-context ul {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.8rem;
+}
+
+.news-context a {
+  color: var(--accent);
+}
+
+.news-publisher {
+  margin-left: 0.35rem;
+  color: var(--text-muted);
+  font-size: 0.72rem;
 }
 
 .chat-error {
