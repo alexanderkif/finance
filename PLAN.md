@@ -107,6 +107,94 @@ with independent degradation per section; no synthetic data.
   Gemini, oversized/unsupported inputs are rejected, and responses never expose
   secrets or internal instructions.
 
+## Phase 7 — Chat progress and interpreted position (GATE 7)
+
+Decisions for this phase:
+
+- One position per message remains the contract. A message that names unrelated
+  legs is refused with a clear one-position explanation instead of being
+  misread as a spread.
+- Keep one market-data request. Stream real stage events from
+  `POST /api/analysis/run` as NDJSON (preferred) or SSE. `parse` remains a
+  separate extraction request, not a market-data request.
+- The analysis card keeps the recommendation. The chat shows the interpreted
+  position and progress instead of duplicating the card's recommendation.
+
+- Replace the single `Working…` line with an ordered activity timeline that
+  records each step, its state, and its timing.
+- Stream only real stages: price history, option chain, underlying quote,
+  news context, deterministic metrics, and synthesis. Emit `started`,
+  `done`, `failed`, `retry`, `warning`, `error`, `result`, and heartbeat
+  events. Do not synthesize progress from timers.
+- Emit the interpreted position immediately after `parse`. For a reference
+  edit, show a provisional interpretation until the chain resolves it, then
+  emit `position_resolved` with the absolute legs.
+- Sending a new message aborts the stream, ignores stale events by request id,
+  and stops server work between stages when the client disconnects. Keep the
+  existing Cancel and "Retry failed step" behavior; a run retry reuses the
+  parsed position and does not repeat extraction.
+- Keep auto-scroll, keyboard access, and `aria-live` behavior; announce only
+  the current step rather than every heartbeat.
+- **GATE 7:** a browser pass on `vercel dev` shows the activity timeline for a
+  live analysis, a cancellation from a new message, and a run retry without a
+  second extraction call. Streaming must be verified as unbuffered in the
+  deployment environment. Backend and frontend tests pass.
+
+## Phase 8 — Conversational context and reference edits (GATE 8)
+
+- Store the last complete parsed positions (up to three) on the client only.
+  Do not add server-side user state.
+- Add an optional, size-limited `context` to `POST /api/analysis/parse`. Run
+  the deterministic scope check on the new user message only; validate the
+  context schema and leg limits separately.
+- Let the extraction call resolve references such as "the same spread",
+  "shift two strikes up", "widen by two strikes", and "change the expiration".
+  It may return absolute legs and an optional operation; it is not the source
+  of truth for listed contracts.
+- After loading the chain, validate every leg against the listed strikes. If
+  the model's strike is not listed, resolve the operation deterministically
+  against the sorted strike ladder; if that is impossible, return `422` with
+  the nearest available strikes.
+- Keep all financial arithmetic in `api/core/metrics.py`. The model never
+  supplies probabilities, sigma, breakeven, P/L, theta, or volatility values.
+- Intent continues to come from the Intent selector, not from the message.
+- Test multilingual reference phrasing, ambiguous or missing context, shifts
+  beyond the listed ladder, width changes, and expiry changes.
+- **GATE 8:** a follow-up such as "the same spread, two strikes higher"
+  resolves to a listed position, an unlisted target returns actionable nearest
+  strikes, and tests prove no metric value comes from the model. Backend and
+  frontend tests pass.
+
+## Phase 9 — Instrument news context (GATE 9)
+
+- Add a ticker-specific Finnhub news context for the analysis: a 30-day
+  window, a small limit, and no general-news fallback presented as instrument
+  news. An empty result is an explicit warning, not a fabricated headline.
+- Fetch news concurrently with the history, chain, and quote work, emit a
+  `news` event as soon as it is available, and include the headlines in the
+  synthesis payload only as supplied context. Instruct the model not to claim
+  causation, invent dates, or give trade instructions.
+- Degrade news independently: a missing key, rate limit, or outage never
+  blocks the option analysis. Record the source and timestamp in the response
+  and surface a warning.
+- News may mention dividends, earnings, or splits, but it is not a calendar.
+  Do not present it as an event calendar. Structured calendars require
+  separate Finnhub endpoints, verified against the real payload and documented
+  in [DATA_CONTRACT.md](DATA_CONTRACT.md) before they are shown.
+- Decide whether headlines appear in the card, the chat timeline, or both
+  without duplicating content or overloading the card.
+- **GATE 9:** a live analysis includes recent ticker headlines when available,
+  omits them with a warning when Finnhub is unavailable, and shows no headline
+  or date that the provider did not return. Tests cover the degraded paths.
+
+## Phase 10 — Example intent cleanup (GATE 10)
+
+- Remove the opening intent from the generated `Use example` message; intent
+  must come only from the Intent selector.
+- Update [API_SPEC.md](API_SPEC.md) and the example, chat, and endpoint tests.
+- **GATE 10:** `Use example` submits an intent-free message, and the selected
+  Intent value appears on the resulting analysis card.
+
 ## Phase completion
 
 For each completed phase, update [TODO.md](TODO.md) and

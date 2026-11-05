@@ -1,5 +1,45 @@
 # Phase log
 
+## Chat progress, context, and news — 2026-11-05
+
+- Added `POST /api/analysis/run/stream`, a single NDJSON analysis request with
+  real stage events (`history`, `news`, `chain`, `quote`, `metrics`,
+  `synthesis`), early `position` and `news` events, heartbeats, warnings, a final
+  `result`, and HTTP-shaped `error` events. `/api/analysis/run` remains the JSON
+  endpoint for existing clients.
+- The Angular chat now renders an ordered activity timeline attached to the user
+  turn instead of a single `Working…` line. It shows retries, warnings,
+  cancellation, and failures, and uses the stream to show the interpreted
+  position before the analysis finishes.
+- `POST /api/analysis/parse` accepts up to three client-owned previous
+  positions. The extraction model may resolve references such as "the same
+  spread" or "shift two strikes up"; the server validates every leg against the
+  real listed strike ladder and applies shift, width, and expiration edits
+  deterministically. A reference without context and two unrelated legs now
+  return actionable `422` messages.
+- Analysis now loads up to five ticker-specific Finnhub headlines from the last
+  30 days as optional synthesis context. Headlines are emitted early to the chat
+  with links and a "not a calendar" caption. The analysis degrades independently
+  with a warning when news is missing, rate limited, or empty; general news is
+  never presented as instrument news.
+- `Use example` no longer embeds an opening intent. Intent always comes from the
+  selector. The analysis card keeps the recommendation; the chat shows the
+  interpreted position, progress, and headlines.
+- Tests: backend 108 pass; frontend 59 pass; production build succeeds. The
+  streaming test reads the NDJSON response incrementally through
+  `httpx.AsyncClient.stream`. Live SPY checks on 2026-11-05 streamed stages,
+  resolved `728/727` to `730/729` for a two-strike shift, and returned five
+  ticker headlines; an invalid Finnhub key degraded to `news: []` with
+  `news_provider_not_configured` while analysis completed.
+- GATE 7 passed on 2026-11-05 through `vercel dev`: the stream used
+  `transfer-encoding: chunked` with `x-accel-buffering: no`, and a timed reader
+  saw stages at 0.18s and 0.89s, a heartbeat at 10.94s, and the result at
+  12.81s. A headless Chrome pass showed the activity timeline, interpreted
+  position, five headlines, and the analysis card, with no `Working…` text.
+  A new message marked the first turn `Cancelled`; a CDP-injected network
+  failure made the chat retry the stream while sending only one parse request.
+  A production-deployment check remains due at release time.
+
 ## Chat analysis cards — 2026-11-04
 
 - Extracted the analysis card into `AnalysisCard` and append it inline for every

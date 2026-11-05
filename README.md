@@ -44,6 +44,7 @@ http://localhost:3000/api/chart/SPY?range=6mo
 http://localhost:3000/api/options/chain/SPY
 POST /api/analysis/parse
 POST /api/analysis/run
+POST /api/analysis/run/stream
 http://localhost:3000/api/docs
 ```
 
@@ -120,12 +121,16 @@ The dashboard opens on SPY and is organised top to bottom:
    is hidden for those symbols with an explanatory note.
 3. The AI chat for describing an option position or spread, with missing-field
    prompts, an intent selector, and a deterministic analysis card appended
-   inline for every answer so results stay comparable. Completed analyses show
-   1-sigma and 2-sigma ranges, volatility context, and playbook event
-   sensitivity. `Use example` submits immediately, and user messages can be
-   copied back into the input for editing. Enter sends, and Shift+Enter inserts
-   a new line. The conversation height can be dragged by its corner grip or
-   adjusted with the keyboard and is remembered between visits.
+   inline for every answer so results stay comparable. The chat streams real
+   analysis stages, shows the interpreted position before the result, and lists
+   recent ticker headlines as context. Follow-ups such as "the same spread, two
+   strikes higher" reuse the client-held previous positions. Completed analyses
+   show 1-sigma and 2-sigma ranges, volatility context, and playbook event
+   sensitivity. `Use example` submits immediately without an intent in the
+   message, and user messages can be copied back into the input for editing.
+   Enter sends, and Shift+Enter inserts a new line. The conversation height can
+   be dragged by its corner grip or adjusted with the keyboard and is
+   remembered between visits.
 
 The UI supports light and dark themes; the theme and selected instrument are
 persisted in `localStorage`, and the stored theme is applied before hydration.

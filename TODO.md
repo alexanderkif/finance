@@ -229,3 +229,109 @@ Update `CHANGELOG_LATEST.md` with each completed phase.
 - [x] Add backend retry tests and frontend cancel, retry-from-failed-step, and
       auto-scroll tests. Evidence on 2026-11-04: backend 95 tests pass;
       frontend 47 tests pass; production build succeeds.
+
+## Phase 7 — Chat progress and interpreted position [x]
+
+- [x] Replace the single `Working…` line with an ordered activity timeline that
+      records each step, its state, and its timing.
+- [x] Keep one market-data request and stream real `POST /api/analysis/run`
+      stage events as NDJSON (preferred) or SSE. Do not split the data fetch
+      into separate requests.
+- [x] Emit only real stages: price history, option chain, underlying quote,
+      news context, deterministic metrics, and synthesis. Include `started`,
+      `done`, `failed`, `retry`, `warning`, `error`, `result`, and heartbeat
+      events; never derive progress from timers.
+- [x] Emit the interpreted position immediately after `parse`. For reference
+      edits, show a provisional interpretation, then the streamed `position`
+      event with the absolute legs once the chain is loaded.
+- [x] Abort the stream when a new message is sent, ignore stale events, and
+      stop server work between stages on disconnect. Keep Cancel and "Retry
+      failed step"; a run retry reuses the parsed position without repeating
+      extraction.
+- [x] Keep auto-scroll, keyboard access, and `aria-live` behavior, announcing
+      only the current step.
+- [x] Refuse a message that names unrelated legs with a clear one-position
+      explanation instead of asking which spread is meant.
+- [x] Keep the recommendation in the analysis card; the chat shows the
+      interpreted position and progress without duplicating the card content.
+- [x] Add backend streaming and frontend activity-timeline tests.
+- [x] Verify through the Vercel dev proxy that the stream is not buffered.
+- **GATE 7:** passed on 2026-11-05. `vercel dev` started both services; the
+  NDJSON response arrived as `transfer-encoding: chunked` with
+  `x-accel-buffering: no`, and a timed reader saw stages at 0.18s and 0.89s,
+  a heartbeat at 10.94s, and the result at 12.81s. A headless Chrome pass
+  submitted a live SPY spread, showed the activity timeline, interpreted
+  position, five headlines, and the analysis card, and found no `Working…`
+  text. A new message marked the first turn `Cancelled` and produced one card
+  for the replacement. Chrome CDP failed the first stream request once; the
+  chat retried automatically, sent two stream requests and one parse request,
+  and rendered the card. Backend: 108 tests pass; frontend: 59 tests pass;
+  production build succeeds. A production-deployment check remains due at
+  release time.
+
+## Phase 8 — Conversational context and reference edits [x]
+
+- [x] Store the last complete parsed positions (up to three) on the client
+      only; add no server-side user state.
+- [x] Add an optional, size-limited `context` to `POST /api/analysis/parse`.
+      Run the scope check on the new message only and validate the context
+      schema and leg limits separately.
+- [x] Let extraction resolve "the same spread", "shift two strikes up",
+      "widen by two strikes", and "change the expiration". It may return
+      absolute legs and an optional operation, but it is not the source of
+      truth for listed contracts.
+- [x] Validate every leg against the loaded chain. If a strike is not listed,
+      resolve the operation deterministically against the sorted strike
+      ladder; otherwise return `422` with the nearest available strikes.
+- [x] Keep all financial arithmetic in `api/core/metrics.py`; the model never
+      supplies probabilities, sigma, breakeven, P/L, theta, or volatility.
+- [x] Keep intent sourced from the Intent selector, not from the message.
+- [x] Test multilingual reference phrasing, ambiguous or missing context,
+      shifts beyond the listed ladder, width changes, and expiry changes.
+- **GATE 8:** passed on 2026-11-05. A "same spread, shifted two strikes up"
+  request resolves to listed legs `734/732`; a reference without context
+  returns `422`; an unlisted strike names the nearest listed strikes; and the
+  deterministic metrics tests prove no metric value comes from the model.
+  A live SPY follow-up resolved `728/727` to `730/729` and returned the
+  corresponding header. Backend: 108 tests pass; frontend: 59 tests pass;
+  build succeeds.
+
+## Phase 9 — Instrument news context [x]
+
+- [x] Add ticker-specific Finnhub news for the analysis: a 30-day window and a
+      small limit, with no general-news fallback presented as instrument news.
+      An empty result is an explicit warning, not a fabricated headline.
+- [x] Fetch news concurrently with history, chain, and quote work; emit a
+      `news` event as soon as it is available; include the headlines in the
+      synthesis payload only as supplied context.
+- [x] Instruct synthesis not to claim causation, invent dates, or give trade
+      instructions, and keep the deterministic disclaimer and metrics.
+- [x] Degrade news independently: a missing key, rate limit, or outage never
+      blocks option analysis. Record the source and timestamp and surface a
+      warning.
+- [x] Do not present news as a dividend, earnings, or splits calendar. News may
+      mention them, but structured calendars require separate Finnhub
+      endpoints, verified against the real payload and documented in
+      [DATA_CONTRACT.md](DATA_CONTRACT.md).
+- [x] Decide whether headlines appear in the card, the chat timeline, or both
+      without duplicating content or overloading the card.
+- [x] Add backend and frontend tests for available news, empty news, and
+      independent degradation.
+- **GATE 9:** passed on 2026-11-05. A live SPY analysis streamed five ticker
+  headlines with `news_source: "finnhub"` and `news_as_of`, and the synthesis
+  used them only as context. A live degraded pass with an invalid Finnhub key
+  returned `news: []`, `news_source: null`, and a
+  `news_provider_not_configured` warning while the analysis still completed.
+  Mocked tests cover empty results, rate limits, and outages. Backend: 108
+  tests pass; frontend: 59 tests pass; build succeeds.
+
+## Phase 10 — Example intent cleanup [x]
+
+- [x] Remove the opening intent from the generated `Use example` message;
+      intent must come only from the Intent selector.
+- [x] Update [API_SPEC.md](API_SPEC.md) and the example, chat, and endpoint
+      tests.
+- **GATE 10:** passed on 2026-11-05. The example message contains no opening
+  intent, and the chat test proves the selected Intent value appears on the
+  resulting analysis card. Backend: 108 tests pass; frontend: 59 tests pass;
+  build succeeds.

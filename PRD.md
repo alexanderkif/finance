@@ -117,6 +117,9 @@ that analysis. It is not a general-purpose chatbot.
 
 - Every analysis includes the disclaimer:
   **Educational analysis, not investment advice.**
+- An analysis may include recent ticker headlines as context only, with their
+  source and timestamp. Headlines are not a dividend, earnings, or splits
+  calendar, and must never supply a metric.
 - Every market-data response includes its source and `as_of` timestamp.
 - The strategy header is
   `{display_name} {underlying} {short_strike}/{long_strike} {expiration}` for a
