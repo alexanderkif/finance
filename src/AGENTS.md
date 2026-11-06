@@ -75,7 +75,11 @@ change.
   x-axis labels only on the bottom-most visible pane. Re-fit both the price and
   volume y-axes to the visible window on zoom, pan, and reset, and pass
   `overwriteInitialConfig: false` to option updates so Reset Zoom restores the
-  full range.
+  full range. Extend the x-axis one candle interval past the newest candle so
+  the right y-axis never covers it. ApexCharts cancels a pan step that would
+  overshoot its data bound, which can leave the viewport short of the newest
+  candle, so keep extra pan headroom in the data extent and pin the right edge
+  back to that one-interval margin on scrolled and zoomed events.
 - Disable ApexCharts tooltips on the price and volume panes; keep the RSI
   tooltip enabled for direct hover only, without group tooltip sync. Show the
   hovered candle's date, OHLC, and volume in the readout, falling back to the
@@ -147,10 +151,11 @@ change.
   resuming from the analysis step.
 - Auto-scroll the chat to the newest message only while the user is at the
   bottom. Stop after they scroll up and resume when they return to the bottom.
-- Make the chat log vertically resizable with a keyboard-accessible separator.
-  Clamp the height, persist it in `localStorage`, and reset to the default on
-  double-click. Keep the same auto-scroll pinned behavior when the height
-  changes.
+- Size the chat log to its content up to a persisted maximum, rather than
+  reserving the maximum height when empty. Make the maximum vertically
+  resizable with a keyboard-accessible separator, clamp and persist it in
+  `localStorage`, and reset it to the default on double-click. Keep the same
+  auto-scroll pinned behavior when the maximum changes.
 - Render only API data for candles, levels, and news. Show explicit
   unavailable and delayed-data states; never synthesize series.
 - Give the chart a text alternative: a keyboard-reachable data table or summary

@@ -1,5 +1,18 @@
 # Phase log
 
+## Chart right edge and chat sizing — 2026-11-06
+
+- The candlestick x-axis now keeps one candle interval past the newest candle.
+  ApexCharts cancels a pan step that would overshoot its bound, which could stop
+  the viewport two or more candles short of the end, so the chart keeps extra
+  pan headroom and pins the right edge back to that one-interval margin after
+  scroll and zoom. The right y-axis no longer hides the newest candles and
+  panning always reaches the end.
+- The chat log now sizes to its content and grows up to the persisted maximum
+  instead of reserving the full height while empty. The corner grip still
+  adjusts that maximum, persists it, and resets it on double-click.
+- Tests: frontend 63 pass; production build succeeds.
+
 ## Chat progress, context, and news — 2026-11-05
 
 - Added `POST /api/analysis/run/stream`, a single NDJSON analysis request with
