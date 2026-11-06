@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { nearestTime, niceAxisScale, pixelToData, PlotArea, priceRange } from './chart-geometry';
+import {
+  medianInterval,
+  nearestTime,
+  niceAxisScale,
+  pixelToData,
+  PlotArea,
+  priceRange,
+} from './chart-geometry';
 
 const area: PlotArea = {
   minX: 1_000,
@@ -58,6 +65,19 @@ describe('chart geometry', () => {
 
   it('returns null without candles', () => {
     expect(priceRange([])).toBeNull();
+  });
+});
+
+describe('medianInterval', () => {
+  it('returns the typical gap between sessions', () => {
+    const day = 86_400_000;
+    expect(medianInterval([0, day, day * 2, day * 5])).toBe(day);
+  });
+
+  it('returns zero when there are not at least two valid times', () => {
+    expect(medianInterval([])).toBe(0);
+    expect(medianInterval([1_000])).toBe(0);
+    expect(medianInterval([1_000, 1_000])).toBe(0);
   });
 });
 

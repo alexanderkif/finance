@@ -89,6 +89,24 @@ export function niceAxisScale(low: number, high: number, intervals = 5): AxisSca
   return { min, max, step };
 }
 
+export function medianInterval(times: readonly number[]): number {
+  if (times.length < 2) {
+    return 0;
+  }
+  const gaps: number[] = [];
+  for (let index = 1; index < times.length; index += 1) {
+    const gap = Math.abs(times[index] - times[index - 1]);
+    if (Number.isFinite(gap) && gap > 0) {
+      gaps.push(gap);
+    }
+  }
+  if (gaps.length === 0) {
+    return 0;
+  }
+  gaps.sort((a, b) => a - b);
+  return gaps[Math.floor(gaps.length / 2)];
+}
+
 export function nearestTime(value: number, times: readonly number[]): number | null {
   if (times.length === 0) {
     return null;

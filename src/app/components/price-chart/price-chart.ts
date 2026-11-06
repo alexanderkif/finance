@@ -9,6 +9,7 @@ import {
 } from 'ng-apexcharts';
 import {
   PlotArea,
+  medianInterval,
   nearestTime,
   niceAxisScale,
   pixelToData,
@@ -166,19 +167,45 @@ export class PriceChart {
     this.data().candles.map((candle) => new Date(candle.t).getTime()),
   );
 
+  private readonly rightPadding = computed(() => medianInterval(this.candleTimes()));
+
+  private readonly panPadding = computed(() => {
+    const interval = this.rightPadding();
+    const times = this.candleTimes();
+    if (interval <= 0 || times.length < 2) {
+      return 0;
+    }
+    const span = times[times.length - 1] - times[0];
+    return span / 12 + interval * 2;
+  });
+
+  private readonly rightEdge = computed(() => {
+    const times = this.candleTimes();
+    return times.length > 0 ? times[times.length - 1] + this.rightPadding() : null;
+  });
+
   private readonly initialYRange = computed(() => this.rangeFor(this.data().candles));
 
   protected readonly series = computed<ApexAxisChartSeries>(() => {
     const palette = this.palette();
+    const times = this.candleTimes();
+    const panPadding = this.panPadding();
+    const paddingPoint =
+      panPadding > 0 && times.length > 0
+        ? [{ x: times[times.length - 1] + panPadding, y: null }]
+        : [];
     const entries: ApexAxisChartSeries = [
       {
         name: 'Price',
         type: 'candlestick',
         color: palette.up,
-        data: this.data().candles.map((candle) => ({
-          x: new Date(candle.t).getTime(),
-          y: [candle.o, candle.h, candle.l, candle.c],
-        })),
+        data: [
+          ...this.data().candles.map((candle) => ({
+            x: new Date(candle.t).getTime(),
+            y: [candle.o, candle.h, candle.l, candle.c],
+          })),
+          ...paddingPoint,
+        ],
       },
     ];
 
@@ -234,13 +261,13 @@ export class PriceChart {
             if (!context) {
               return;
             }
-            this.scaleYToRange(context.xaxis.min, context.xaxis.max);
+            this.applyVisibleWindow(context.xaxis.min, context.xaxis.max);
           },
           scrolled: (_event, context) => {
             if (!context) {
               return;
             }
-            this.scaleYToRange(context.xaxis.min, context.xaxis.max);
+            this.applyVisibleWindow(context.xaxis.min, context.xaxis.max);
           },
         },
       },
@@ -260,7 +287,7 @@ export class PriceChart {
       xaxis: {
         type: 'datetime',
         min: times.length > 0 ? times[0] : undefined,
-        max: times.length > 0 ? times[times.length - 1] : undefined,
+        max: times.length > 0 ? times[times.length - 1] + this.rightPadding() : undefined,
         tickAmount: 6,
         labels: {
           show: this.bottomChart() === 'price',
@@ -677,6 +704,30 @@ export class PriceChart {
 
   private maxVolumeOf(candles: Candle[]): number {
     return candles.reduce((max, candle) => Math.max(max, candle.v ?? 0), 0);
+  }
+
+  private applyVisibleWindow(minTime: number, maxTime: number): void {
+    if (!Number.isFinite(minTime) || !Number.isFinite(maxTime) || maxTime <= minTime) {
+      return;
+    }
+    const edge = this.rightEdge();
+    if (edge !== null && maxTime > edge) {
+      const span = maxTime - minTime;
+      const pinnedMin = edge - span;
+      const instance = this.chartInstance();
+      if (instance) {
+        void instance.updateOptions(
+          { xaxis: { min: pinnedMin, max: edge } },
+          false,
+          false,
+          false,
+          false,
+        );
+      }
+      this.scaleYToRange(pinnedMin, edge);
+      return;
+    }
+    this.scaleYToRange(minTime, maxTime);
   }
 
   private scaleYToRange(minTime: number, maxTime: number): void {
