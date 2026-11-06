@@ -418,9 +418,18 @@ describe('AnalysisChat', () => {
     expect(button(compiled, 'Retry failed step')).toBeUndefined();
   });
 
+  it('sizes the conversation to its content up to the saved maximum', async () => {
+    const { compiled } = await setup();
+    const frame = compiled.querySelector<HTMLElement>('.chat-log-frame');
+    const log = compiled.querySelector<HTMLElement>('.chat-log');
+    expect(frame?.style.height).toBe('');
+    expect(log?.style.maxHeight).toBe('640px');
+  });
+
   it('resizes the conversation with the keyboard and persists the height', async () => {
     const { fixture, compiled } = await setup();
     const resizer = compiled.querySelector<HTMLElement>('.chat-resizer');
+    const log = compiled.querySelector<HTMLElement>('.chat-log');
     expect(resizer).not.toBeNull();
     expect(resizer!.getAttribute('aria-valuenow')).toBe('640');
 
@@ -430,12 +439,14 @@ describe('AnalysisChat', () => {
     fixture.detectChanges();
 
     expect(resizer!.getAttribute('aria-valuenow')).toBe('664');
+    expect(log?.style.maxHeight).toBe('664px');
     expect(localStorage.getItem('osa.chat.height')).toBe('664');
 
     resizer!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
     fixture.detectChanges();
 
     expect(resizer!.getAttribute('aria-valuenow')).toBe('640');
+    expect(log?.style.maxHeight).toBe('640px');
     expect(localStorage.getItem('osa.chat.height')).toBe('640');
   });
 

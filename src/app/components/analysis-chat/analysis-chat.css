@@ -35,10 +35,10 @@
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  height: 100%;
+  height: auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 0.25rem 0.15rem 0.5rem;
+  padding: 0.25rem 0.15rem 2.1rem;
 }
 
 .chat-log-frame {

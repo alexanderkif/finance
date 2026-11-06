@@ -16,7 +16,7 @@
     </button>
   </header>
 
-  <div class="chat-log-frame" [style.height.px]="chatHeight()">
+  <div class="chat-log-frame">
     <div
       #chatLog
       id="chat-log"
@@ -24,6 +24,7 @@
       role="log"
       aria-live="polite"
       aria-label="Conversation"
+      [style.maxHeight.px]="chatHeight()"
       (scroll)="onScroll($event)"
     >
       @for (message of messages(); track $index) {
@@ -127,15 +128,15 @@
       class="chat-resizer"
       role="separator"
       aria-orientation="horizontal"
-      aria-label="Resize conversation"
+      aria-label="Resize conversation maximum height"
       aria-controls="chat-log"
       aria-valuemin="{{ minChatHeight }}"
       aria-valuemax="{{ maxChatHeight }}"
       aria-valuenow="{{ chatHeight() }}"
-      aria-valuetext="{{ chatHeight() }} pixels"
+      aria-valuetext="Maximum {{ chatHeight() }} pixels"
       aria-keyshortcuts="ArrowUp ArrowDown Home End"
       tabindex="0"
-      title="Drag to resize. Double-click to reset."
+      title="Drag to set the maximum height. Double-click to reset."
       (pointerdown)="startResize($event)"
       (pointermove)="resizeWithPointer($event)"
       (pointerup)="endResize($event)"
