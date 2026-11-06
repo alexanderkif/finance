@@ -471,4 +471,25 @@ describe('AnalysisChat', () => {
 
     expect(log!.scrollTop).toBe(1_000);
   });
+
+  it('scrolls to the latest message when Analyze is clicked', async () => {
+    const { fixture, compiled, parse } = await setup();
+    const log = compiled.querySelector<HTMLElement>('.chat-log');
+    expect(log).not.toBeNull();
+    Object.defineProperty(log!, 'scrollHeight', { configurable: true, value: 1_000 });
+    Object.defineProperty(log!, 'clientHeight', { configurable: true, value: 200 });
+    log!.scrollTop = 0;
+    log!.dispatchEvent(new Event('scroll'));
+    fixture.detectChanges();
+
+    typeMessage(compiled, 'buy call XSP 600');
+    fixture.detectChanges();
+    button(compiled, 'Analyze')!.click();
+    fixture.detectChanges();
+
+    expect(parse).toHaveBeenCalledTimes(1);
+    expect(log!.scrollTop).toBe(1_000);
+
+    button(compiled, 'Cancel')!.click();
+  });
 });

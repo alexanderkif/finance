@@ -16,7 +16,7 @@
     </button>
   </header>
 
-  <div class="chat-log-frame">
+  <div class="chat-log-frame" [style.height.px]="chatHeight()">
     <div
       #chatLog
       id="chat-log"
@@ -24,7 +24,6 @@
       role="log"
       aria-live="polite"
       aria-label="Conversation"
-      [style.height.px]="chatHeight()"
       (scroll)="onScroll($event)"
     >
       @for (message of messages(); track $index) {
@@ -198,7 +197,14 @@
       @if (busy()) {
         <button type="button" class="button button-quiet" (click)="cancel()">Cancel</button>
       }
-      <button type="submit" class="button button-primary" [disabled]="!canSend()">Analyze</button>
+      <button
+        type="submit"
+        class="button button-primary"
+        [disabled]="!canSend()"
+        (click)="scrollToLatestOnAnalyze()"
+      >
+        Analyze
+      </button>
     </div>
   </form>
 </section>

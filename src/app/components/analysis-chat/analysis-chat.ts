@@ -174,6 +174,10 @@ export class AnalysisChat {
     this.scrollPinned.set(distanceFromBottom <= 32);
   }
 
+  protected scrollToLatestOnAnalyze(): void {
+    this.scrollPinned.set(true);
+  }
+
   protected startResize(event: PointerEvent): void {
     if (event.button !== 0) {
       return;
