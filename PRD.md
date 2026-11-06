@@ -14,7 +14,7 @@ before a commercial launch.
 
 The existing application may be substantially or completely rewritten to meet
 this contract; its current implementation is not a compatibility constraint.
-Use Google Gemini `gemini-3.1-flash-lite` on the free tier as the initial LLM
+Use Google Gemini `gemini-3.5-flash-lite` on the free tier as the initial LLM
 choice. Treat the model and free-tier availability as a current implementation
 choice, not a guarantee of permanent quotas or availability.
 

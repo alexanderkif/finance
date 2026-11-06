@@ -5,7 +5,7 @@ Unavailable values are explicit; see [DATA_CONTRACT.md](DATA_CONTRACT.md).
 
 ## LLM configuration
 
-- Use Google Gemini model `gemini-3.1-flash-lite` on the free tier for now.
+- Use Google Gemini model `gemini-3.5-flash-lite` on the free tier for now.
 - The server reads `GEMINI_API_KEY` from its environment. Local development
   uses the repository-root `.env.local`; production uses deployment
   environment settings.

@@ -12,7 +12,7 @@ from settings import (
 
 class GeminiSettingsTests(unittest.TestCase):
     def test_configures_the_initial_gemini_model(self) -> None:
-        self.assertEqual(GEMINI_MODEL, "gemini-3.1-flash-lite")
+        self.assertEqual(GEMINI_MODEL, "gemini-3.5-flash-lite")
 
     def test_requires_an_api_key_for_gemini_requests(self) -> None:
         with (

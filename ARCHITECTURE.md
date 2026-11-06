@@ -40,7 +40,7 @@ Keep HTTP routing, provider access, deterministic metrics, and LLM orchestration
 in their respective modules. Providers are isolated behind adapters so the
 free-tier sources can be replaced without changing response contracts.
 
-Use `gemini-3.1-flash-lite` for both model calls per analysis: extraction and
+Use `gemini-3.5-flash-lite` for both model calls per analysis: extraction and
 synthesis. Prefer a direct Gemini structured-output call; adopt
 LangChain/LangGraph only if the analysis flow grows beyond one deterministic
 pipeline, and record that decision. The current implementation calls Gemini

@@ -9,7 +9,7 @@ Update `CHANGELOG_LATEST.md` with each completed phase.
 - [x] Inspect existing application and deployment; decide what to reuse,
       refactor, or replace.
 - [x] Configure server-side `GEMINI_API_KEY` and
-      `gemini-3.1-flash-lite` access without exposing the key to the client.
+      `gemini-3.5-flash-lite` access without exposing the key to the client.
 - [x] Verify local `.env.local` is ignored by Git.
 - [x] Keep the current Vercel service entry points for the initial
       implementation; verify the routing configuration.

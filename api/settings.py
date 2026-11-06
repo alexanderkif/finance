@@ -7,7 +7,7 @@ _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 load_dotenv(_REPOSITORY_ROOT / ".env.local", override=False)
 
-GEMINI_MODEL = "gemini-3.1-flash-lite"
+GEMINI_MODEL = "gemini-3.5-flash-lite"
 
 
 def require_gemini_api_key() -> str:

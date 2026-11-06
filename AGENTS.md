@@ -23,7 +23,7 @@ that a feature already exists. Inspect the implementation before changing it.
   it best meets the product contract. Do not preserve legacy code solely for
   backward compatibility; keep deployment behavior working or update and
   verify its configuration.
-- Use the Google Gemini `gemini-3.1-flash-lite` model on the free tier for
+- Use the Google Gemini `gemini-3.5-flash-lite` model on the free tier for
   now. Read `GEMINI_API_KEY` from the server environment, using the local
   `.env.local` for development and deployment environment settings in
   production. Never expose or log the key in client code, responses, or docs.

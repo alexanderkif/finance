@@ -10,7 +10,7 @@ the product contract and verify the resulting deployment configuration.
 - Inspect the existing app and deployment configuration, then decide what to
   reuse, refactor, or replace based on the product contract.
 - Configure server-side Gemini access with `GEMINI_API_KEY` and the
-  `gemini-3.1-flash-lite` model. Use `.env.local` for local development and
+  `gemini-3.5-flash-lite` model. Use `.env.local` for local development and
   deployment environment settings in production.
 - Keep or replace the Vercel API entry point as appropriate; verify the final
   routing and deployment configuration.
@@ -32,7 +32,7 @@ the product contract and verify the resulting deployment configuration.
 - Add all eight JSON playbooks and the vertical-spread truth table from
   [PLAYBOOK_SPEC.md](PLAYBOOK_SPEC.md).
 - Implement `POST /api/analysis/parse` with Gemini
-  `gemini-3.1-flash-lite` structured output and contract tests.
+  `gemini-3.5-flash-lite` structured output and contract tests.
 - **GATE 2:** tests identify the XSP example as a two-leg `bull_put_spread`
   from both `XSP 2030-11-15` and `XSP 15.11.2030` date formats, and return
   exactly `missing_fields: ["expiration"]` for `buy call SPY 600`.
