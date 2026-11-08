@@ -4,9 +4,15 @@ import { Component, afterNextRender, computed, inject, signal } from '@angular/c
 import { errorMessage } from './api-error';
 import { AnalysisChat } from './components/analysis-chat/analysis-chat';
 import { PriceChart } from './components/price-chart/price-chart';
-import { ChartRange, ChartResponse, MarketResponse, NewsHeadline } from './models/market-data';
+import {
+  ChartRange,
+  ChartResponse,
+  ChatMarketSnapshot,
+  MarketResponse,
+  NewsHeadline,
+} from './models/market-data';
 import { formatPrice } from './price-format';
-import { Preferences } from './services/preferences';
+import { DEFAULT_SYMBOL, Preferences } from './services/preferences';
 import { chartPalette } from './theme-palette';
 import { warningLabel } from './warning-labels';
 
@@ -21,10 +27,23 @@ export class App {
 
   protected readonly browserReady = signal(false);
   protected readonly range = this.preferences.range;
-  protected readonly tickerInput = signal('SPY');
+  protected readonly tickerInput = signal(DEFAULT_SYMBOL);
   protected readonly tickerError = signal<string | null>(null);
   protected readonly ranges: readonly ChartRange[] = ['1mo', '3mo', '6mo', '1y', '5y'];
-  protected readonly popularSymbols = ['SPY', 'QQQ', 'AAPL', 'TSLA', 'XSP'];
+  protected readonly popularSymbols = [
+    'AAPL',
+    'AMZN',
+    'DIA',
+    'GOOGL',
+    'IWM',
+    'META',
+    'MSFT',
+    'NVDA',
+    'QQQ',
+    'SPY',
+    'TSLA',
+    'XSP',
+  ];
 
   protected readonly theme = this.preferences.theme;
   protected readonly symbol = this.preferences.symbol;
@@ -50,6 +69,42 @@ export class App {
   private readonly marketData = computed(() =>
     this.market.hasValue() ? this.market.value() : undefined,
   );
+
+  protected readonly chatSnapshot = computed<ChatMarketSnapshot | null>(() => {
+    const symbol = this.symbol();
+    const market = this.marketData()?.symbol === symbol ? this.marketData() : undefined;
+    const chart = this.chartData()?.symbol === symbol ? this.chartData() : undefined;
+    if (!market && !chart) {
+      return null;
+    }
+    return {
+      symbol,
+      price: market?.price ?? null,
+      change_pct: market?.change_pct ?? null,
+      vix: market?.vix ?? null,
+      support: chart?.support ?? [],
+      resistance: chart?.resistance ?? [],
+      candles: (chart?.candles ?? []).slice(-120),
+      sma: (chart?.sma ?? []).map((series) => ({
+        ...series,
+        points: series.points.slice(-120),
+      })),
+      rsi: chart?.rsi
+        ? { ...chart.rsi, points: chart.rsi.points.slice(-120) }
+        : { period: 14, points: [] },
+      news: market?.news ?? [],
+      range: chart?.range ?? this.range(),
+      chart_source: chart?.source ?? null,
+      chart_as_of: chart?.as_of ?? null,
+      as_of: market?.as_of ?? chart?.as_of ?? null,
+      quote_as_of: market?.quote_as_of ?? null,
+      vix_as_of: market?.vix_as_of ?? null,
+      news_as_of: market?.news_as_of ?? null,
+      sources: market?.sources ?? { quote: null, vix: null, news: null },
+      degraded: Boolean(market?.degraded) || Boolean(chart?.degraded),
+      warnings: [...new Set([...(market?.warnings ?? []), ...(chart?.warnings ?? [])])],
+    };
+  });
 
   protected readonly support = computed(() => this.chartData()?.support ?? []);
   protected readonly resistance = computed(() => this.chartData()?.resistance ?? []);

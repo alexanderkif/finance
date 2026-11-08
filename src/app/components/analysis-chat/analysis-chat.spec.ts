@@ -1,50 +1,184 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MarketApi } from '../../services/market-data';
-import { AnalysisResult, ParseResponse } from '../../models/market-data';
+import { Preferences } from '../../services/preferences';
+import {
+  AnalysisResult,
+  ChatMarketSnapshot,
+  ChatTurnRequest,
+  ChatTurnResponse,
+} from '../../models/market-data';
 import { AnalysisChat } from './analysis-chat';
 
-const missingStrike: ParseResponse = {
-  position_type: 'single',
-  legs: [
-    {
-      symbol: 'XSP',
-      side: 'buy',
-      option_type: 'call',
-      strike: null,
-      expiration: '2030-11-15',
-    },
-  ],
-  missing_fields: ['strike'],
-  detected_language: 'English',
+const snapshotStub: ChatMarketSnapshot = {
+  symbol: 'AAPL',
+  price: 245,
+  change_pct: 1.2,
+  vix: 18.5,
+  support: [240],
+  resistance: [250],
+  candles: [],
+  sma: [],
+  rsi: { period: 14, points: [] },
+  news: [],
+  range: '6mo',
+  chart_source: null,
+  chart_as_of: null,
+  as_of: '2026-11-08T15:00:00Z',
+  quote_as_of: '2026-11-08T15:00:00Z',
+  vix_as_of: '2026-11-08T15:00:00Z',
+  news_as_of: null,
+  sources: { quote: 'cboe_delayed', vix: 'cboe_delayed', news: null },
+  degraded: false,
+  warnings: [],
 };
 
-const completePosition: ParseResponse = {
-  position_type: 'single',
+const longCallDraft = {
+  position_type: 'single' as const,
   legs: [
     {
-      symbol: 'XSP',
-      side: 'buy',
-      option_type: 'call',
-      strike: 600,
-      expiration: '2030-11-15',
+      symbol: 'AAPL',
+      side: 'buy' as const,
+      option_type: 'call' as const,
+      strike: 245,
+      expiration: '2026-12-18',
     },
   ],
-  missing_fields: [],
-  detected_language: 'English',
-  header: 'Long Call XSP 600 2030-11-15',
+  strategy_key: 'long_call',
+  reference: null,
+};
+
+const spreadDraft = {
+  position_type: 'strategy' as const,
+  legs: [
+    {
+      symbol: 'AAPL',
+      side: 'sell' as const,
+      option_type: 'put' as const,
+      strike: 240,
+      expiration: '2026-12-18',
+    },
+    {
+      symbol: 'AAPL',
+      side: 'buy' as const,
+      option_type: 'put' as const,
+      strike: 230,
+      expiration: '2026-12-18',
+    },
+  ],
+  strategy_key: 'bull_put_spread',
+  reference: null,
+};
+
+const confirmResponse: ChatTurnResponse = {
+  mode: 'confirm',
+  text: 'AAPL is near 245.00. I can use Long Call AAPL 245 2026-12-18. Use these, or tell me what to change.',
+  language: 'English',
+  intent: 'open',
+  draft: longCallDraft,
+  missing: [],
+  suggestions: {
+    fields: ['expiration', 'side', 'strike'],
+    expiration: '2026-12-18',
+    strike: 245,
+    long_strike: null,
+    width: null,
+  },
+  confirm: {
+    summary: 'Long Call AAPL 245 2026-12-18',
+    position: {
+      position_type: 'single',
+      legs: [
+        {
+          symbol: 'AAPL',
+          side: 'buy',
+          option_type: 'call',
+          strike: 245,
+          expiration: '2026-12-18',
+        },
+      ],
+    },
+  },
+  switch: null,
+  pending_draft: null,
+  as_of: '2026-11-08T15:00:00Z',
+  degraded: false,
+  warnings: [],
+};
+
+const spreadConfirmResponse: ChatTurnResponse = {
+  ...confirmResponse,
+  text: 'AAPL is near 245.00. I can use Bull Put Spread AAPL 240/230 2026-12-18.',
+  draft: spreadDraft,
+  suggestions: {
+    fields: ['expiration', 'long_strike', 'side', 'strike'],
+    expiration: '2026-12-18',
+    strike: 240,
+    long_strike: 230,
+    width: 2,
+  },
+  confirm: {
+    summary: 'Bull Put Spread AAPL 240/230 2026-12-18',
+    position: {
+      position_type: 'strategy',
+      legs: spreadDraft.legs,
+    },
+  },
+};
+
+const answerResponse: ChatTurnResponse = {
+  mode: 'answer',
+  text: 'AAPL is above SMA 20 and SMA 50, RSI is 58, and VIX 18.5 is calm.',
+  language: 'English',
+  intent: 'open',
+  draft: null,
+  missing: [],
+  suggestions: null,
+  confirm: null,
+  switch: null,
+  pending_draft: null,
+  as_of: '2026-11-08T15:00:00Z',
+  degraded: false,
+  warnings: [],
+};
+
+const refusedResponse: ChatTurnResponse = {
+  ...answerResponse,
+  mode: 'refused',
+  text: "I can help with this instrument's chart, market context, news, and option positions.",
+};
+
+const switchResponse: ChatTurnResponse = {
+  ...answerResponse,
+  mode: 'switch_symbol',
+  text: 'You are asking about MSFT, while the chart shows AAPL. Switch to MSFT?',
+  switch: {
+    symbol: 'MSFT',
+    explicit: false,
+    reason: 'The user asked about another instrument.',
+  },
+};
+
+const explicitSwitchResponse: ChatTurnResponse = {
+  ...switchResponse,
+  text: 'Switching to MSFT.',
+  switch: {
+    symbol: 'MSFT',
+    explicit: true,
+    reason: 'Explicit instrument command.',
+  },
 };
 
 const analysisStub: AnalysisResult = {
   strategy_key: 'long_call',
   intent: 'open',
-  header: 'Long Call XSP 600 2030-11-15',
+  header: 'Long Call AAPL 245 2026-12-18',
   recommendation: 'This long call has a defined maximum loss of the premium paid.',
   probability_positive: 0.4,
   max_profit: null,
   max_loss: 500,
   net_credit_debit: -500,
-  breakeven: 605,
+  breakeven: 250,
   theta_daily: -1,
   iv_rank: null,
   current_iv: 0.18,
@@ -59,27 +193,15 @@ const analysisStub: AnalysisResult = {
     volume: 400,
     rating: 'fair',
   },
-  scenario_1sigma: {
-    expected_move: 10,
-    low: 590,
-    high: 610,
-    days_to_expiration: 30,
-    atm_iv: 0.18,
-  },
-  scenario_2sigma: {
-    expected_move: 20,
-    low: 580,
-    high: 620,
-    days_to_expiration: 30,
-    atm_iv: 0.18,
-  },
+  scenario_1sigma: null,
+  scenario_2sigma: null,
   news: [],
   news_source: null,
   news_as_of: null,
   detected_language: 'English',
   disclaimer: 'Educational analysis, not investment advice.',
   source: 'cboe_delayed',
-  as_of: '2030-10-28T15:48:15Z',
+  as_of: '2026-10-28T15:48:15Z',
   degraded: true,
   warnings: [],
 };
@@ -91,37 +213,19 @@ const quotaError = new HttpErrorResponse({
   },
 });
 
-function pendingUntilAborted(signal?: AbortSignal): Promise<ParseResponse> {
-  return new Promise((_resolve, reject) => {
-    signal?.addEventListener('abort', () => {
-      reject(new DOMException('The request was cancelled.', 'AbortError'));
-    });
-  });
-}
-
-function pendingAnalysis(signal?: AbortSignal): Promise<AnalysisResult> {
-  return new Promise((_resolve, reject) => {
-    signal?.addEventListener('abort', () => {
-      reject(new DOMException('The request was cancelled.', 'AbortError'));
-    });
-  });
-}
-
 describe('AnalysisChat', () => {
   async function setup(): Promise<{
     fixture: ComponentFixture<AnalysisChat>;
     compiled: HTMLElement;
-    parse: ReturnType<typeof vi.fn>;
+    chatTurn: ReturnType<typeof vi.fn>;
     streamAnalysis: ReturnType<typeof vi.fn>;
+    preferences: Preferences;
   }> {
     localStorage.clear();
-    const parse = vi.fn(
-      (_message: string, _symbol: string, signal?: AbortSignal, _context?: unknown) =>
-        pendingUntilAborted(signal),
-    );
-    const streamAnalysis = vi.fn();
+    const chatTurn = vi.fn(async (_request: ChatTurnRequest) => confirmResponse);
+    const streamAnalysis = vi.fn(async () => analysisStub);
     const api = {
-      parse,
+      chatTurn,
       streamAnalysis,
       getExample: vi.fn(),
     };
@@ -131,13 +235,15 @@ describe('AnalysisChat', () => {
     }).compileComponents();
 
     const fixture = TestBed.createComponent(AnalysisChat);
-    fixture.componentRef.setInput('symbol', 'XSP');
+    fixture.componentRef.setInput('symbol', 'AAPL');
+    fixture.componentRef.setInput('snapshot', snapshotStub);
     fixture.detectChanges();
     return {
       fixture,
       compiled: fixture.nativeElement as HTMLElement,
-      parse,
+      chatTurn,
       streamAnalysis,
+      preferences: TestBed.inject(Preferences),
     };
   }
 
@@ -166,216 +272,102 @@ describe('AnalysisChat', () => {
     fixture.detectChanges();
   }
 
-  it('cancels the active request from the chat', async () => {
-    const { fixture, compiled, parse } = await setup();
-    typeMessage(compiled, 'buy call XSP 600');
-    submit(fixture, compiled);
+  it('greets the user and answers a market question', async () => {
+    const { fixture, compiled, chatTurn } = await setup();
+    chatTurn.mockResolvedValue(answerResponse);
 
-    expect(compiled.querySelector('.activity-timeline')?.textContent).toContain(
-      'Interpreting your request',
-    );
+    expect(compiled.querySelector('.chat-header h2')?.textContent).toContain('Market chat');
+    expect(compiled.querySelector('.chat-log')?.textContent).toContain('I can explain');
 
-    button(compiled, 'Cancel')!.click();
-    fixture.detectChanges();
-
-    const signal = parse.mock.calls[0]?.[2] as AbortSignal;
-    expect(signal.aborted).toBe(true);
-    expect(compiled.querySelector('.activity-running')).toBeNull();
-    expect(compiled.querySelector('.activity-timeline')?.textContent).toContain('Cancelled');
-    expect(button(compiled, 'Cancel')).toBeUndefined();
-  });
-
-  it('cancels the previous request when a new message is sent', async () => {
-    const { fixture, compiled, parse } = await setup();
-    typeMessage(compiled, 'buy call XSP 600');
-    submit(fixture, compiled);
-    typeMessage(compiled, 'buy put XSP 500');
-    submit(fixture, compiled);
-
-    expect(parse).toHaveBeenCalledTimes(2);
-    expect((parse.mock.calls[0]?.[2] as AbortSignal).aborted).toBe(true);
-    expect((parse.mock.calls[1]?.[2] as AbortSignal).aborted).toBe(false);
-
-    button(compiled, 'Cancel')!.click();
-  });
-
-  it('copies a previous user message back into the chat input', async () => {
-    const { fixture, compiled } = await setup();
-    typeMessage(compiled, 'buy call XSP 600');
-    submit(fixture, compiled);
-
-    const edit = compiled.querySelector<HTMLButtonElement>(
-      'button[aria-label="Edit message in the chat input"]',
-    );
-    expect(edit).not.toBeNull();
-    edit!.click();
-    fixture.detectChanges();
-
-    const textarea = compiled.querySelector<HTMLTextAreaElement>('.chat-form textarea');
-    expect(textarea?.value).toBe('buy call XSP 600');
-
-    button(compiled, 'Cancel')!.click();
-  });
-
-  it('sends on Enter and keeps Shift+Enter for a new line', async () => {
-    const { fixture, compiled, parse } = await setup();
-    typeMessage(compiled, 'buy call XSP 600');
-    const textarea = compiled.querySelector<HTMLTextAreaElement>('.chat-form textarea')!;
-
-    textarea.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'Enter',
-        shiftKey: true,
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
-    fixture.detectChanges();
-    expect(parse).not.toHaveBeenCalled();
-
-    textarea.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'Enter',
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
-    fixture.detectChanges();
-
-    expect(parse).toHaveBeenCalledTimes(1);
-    expect(compiled.querySelector('.activity-timeline')).not.toBeNull();
-
-    button(compiled, 'Cancel')!.click();
-  });
-
-  it('retries the analysis step without parsing or repeating the message', async () => {
-    const { fixture, compiled, parse, streamAnalysis } = await setup();
-    parse.mockResolvedValue(completePosition);
-    streamAnalysis.mockRejectedValueOnce(quotaError).mockResolvedValue(analysisStub);
-
-    typeMessage(compiled, 'buy call XSP 600 2030-11-15');
+    typeMessage(compiled, 'what is the trend?');
     submit(fixture, compiled);
     await settle(fixture);
 
-    expect(parse).toHaveBeenCalledTimes(1);
+    expect(chatTurn).toHaveBeenCalledTimes(1);
+    expect(compiled.querySelector('.chat-log')?.textContent).toContain('above SMA 20');
+    expect(compiled.querySelector('.draft-card')).toBeNull();
+  });
+
+  it('renders a draft and runs the analysis from Analyze', async () => {
+    const { fixture, compiled, chatTurn, streamAnalysis } = await setup();
+
+    typeMessage(compiled, 'long call');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    expect(chatTurn).toHaveBeenCalledTimes(1);
+    const draftCard = compiled.querySelector('.draft-card');
+    expect(draftCard?.textContent).toContain('Long Call AAPL 245 2026-12-18');
+    expect(draftCard?.textContent).toContain('Suggested from the live chain');
+    expect(draftCard?.textContent).toContain('not a recommendation');
+
+    button(compiled, 'Analyze')!.click();
+    await settle(fixture);
+
     expect(streamAnalysis).toHaveBeenCalledTimes(1);
-    expect(compiled.querySelectorAll('.message-user')).toHaveLength(1);
-    expect(compiled.querySelector('.error')?.textContent).toContain('quota');
-
-    button(compiled, 'Retry failed step')!.click();
-    await settle(fixture);
-
-    expect(parse).toHaveBeenCalledTimes(1);
-    expect(streamAnalysis).toHaveBeenCalledTimes(2);
-    expect(compiled.querySelectorAll('.message-user')).toHaveLength(1);
-    expect(compiled.querySelector('.error')).toBeNull();
-    const card = compiled.querySelector('.analysis-card');
-    expect(card).not.toBeNull();
-    expect(card?.textContent).toContain('2σ');
-    expect(card?.textContent).toContain('Playbook event sensitivity');
-    expect(card?.textContent).toContain('open');
+    const request = streamAnalysis.mock.calls[0]?.[0] as {
+      position: { legs: unknown[] };
+    };
+    expect(request.position.legs).toHaveLength(1);
+    expect(compiled.querySelector('.analysis-card')).not.toBeNull();
+    expect(compiled.querySelector('.draft-card')).toBeNull();
   });
 
-  it('retries parsing when that step failed', async () => {
-    const { fixture, compiled, parse, streamAnalysis } = await setup();
-    parse.mockRejectedValueOnce(quotaError).mockResolvedValue(completePosition);
-    streamAnalysis.mockResolvedValue(analysisStub);
+  it('runs a plain yes without another chat turn', async () => {
+    const { fixture, compiled, chatTurn, streamAnalysis } = await setup();
 
-    typeMessage(compiled, 'buy call XSP 600 2030-11-15');
+    typeMessage(compiled, 'long call');
     submit(fixture, compiled);
     await settle(fixture);
 
-    expect(parse).toHaveBeenCalledTimes(1);
-    expect(streamAnalysis).not.toHaveBeenCalled();
-
-    button(compiled, 'Retry failed step')!.click();
+    typeMessage(compiled, 'yes');
+    submit(fixture, compiled);
     await settle(fixture);
 
-    expect(parse).toHaveBeenCalledTimes(2);
-    expect(parse.mock.calls[0]?.[0]).toBe(parse.mock.calls[1]?.[0]);
+    expect(chatTurn).toHaveBeenCalledTimes(1);
     expect(streamAnalysis).toHaveBeenCalledTimes(1);
-    expect(compiled.querySelectorAll('.message-user')).toHaveLength(1);
+    expect(compiled.querySelectorAll('.message-user')).toHaveLength(2);
+    expect(compiled.querySelector('.analysis-card')).not.toBeNull();
   });
 
-  it('shows the interpreted position before the analysis finishes', async () => {
-    const { fixture, compiled, parse, streamAnalysis } = await setup();
-    parse.mockResolvedValue(completePosition);
-    streamAnalysis.mockImplementation((_request, _onEvent, signal) => pendingAnalysis(signal));
+  it('uses the detected language for the analysis request', async () => {
+    const { fixture, compiled, chatTurn, streamAnalysis } = await setup();
+    chatTurn.mockResolvedValue({ ...confirmResponse, language: 'Russian' });
 
-    typeMessage(compiled, 'buy call XSP 600 2030-11-15');
+    typeMessage(compiled, 'лонг колл');
     submit(fixture, compiled);
     await settle(fixture);
 
-    expect(compiled.querySelector('.position-summary')?.textContent).toContain(
-      'Long Call XSP 600 2030-11-15',
-    );
-    expect(compiled.querySelector('.position-legs')?.textContent).toContain('600');
-
-    button(compiled, 'Cancel')!.click();
-  });
-
-  it('sends previous positions as context for a follow-up', async () => {
-    const { fixture, compiled, parse, streamAnalysis } = await setup();
-    parse.mockResolvedValue(completePosition);
-    streamAnalysis.mockResolvedValue(analysisStub);
-
-    typeMessage(compiled, 'buy call XSP 600 2030-11-15');
-    submit(fixture, compiled);
+    button(compiled, 'Analyze')!.click();
     await settle(fixture);
 
-    typeMessage(compiled, 'shift it two strikes up');
-    submit(fixture, compiled);
-    await settle(fixture);
-
-    expect(parse).toHaveBeenCalledTimes(2);
-    const context = parse.mock.calls[1]?.[3] as unknown[];
-    expect(context).toHaveLength(1);
-    expect(JSON.stringify(context[0])).toContain('600');
+    const request = streamAnalysis.mock.calls[0]?.[0] as {
+      detected_language: string;
+    };
+    expect(request.detected_language).toBe('Russian');
   });
 
-  it('renders streamed stage updates in the activity timeline', async () => {
-    const { fixture, compiled, parse, streamAnalysis } = await setup();
-    parse.mockResolvedValue(completePosition);
+  it('localizes chat copy and analysis stages for a Russian response', async () => {
+    const { fixture, compiled, chatTurn, streamAnalysis } = await setup();
+    chatTurn.mockResolvedValue({
+      ...confirmResponse,
+      language: 'Russian',
+      text: 'Могу использовать Long Call AAPL 245 2026-12-18.',
+    });
     streamAnalysis.mockImplementation(
       async (_request: unknown, onEvent: (event: unknown) => void) => {
         onEvent({
           type: 'stage',
-          id: 'chain',
-          status: 'started',
-          label: 'Loading the option chain',
-        });
-        onEvent({
-          type: 'stage',
-          id: 'chain',
+          id: 'history',
           status: 'done',
-          label: 'Loading the option chain',
-          detail: '12 contracts',
+          label: '260 daily candles',
         });
-        return analysisStub;
-      },
-    );
-
-    typeMessage(compiled, 'buy call XSP 600 2030-11-15');
-    submit(fixture, compiled);
-    await settle(fixture);
-
-    const timeline = compiled.querySelector('.activity-timeline');
-    expect(timeline?.textContent).toContain('Loading the option chain');
-    expect(timeline?.textContent).toContain('12 contracts');
-    expect(compiled.querySelector('.activity-running')).toBeNull();
-  });
-
-  it('renders recent headlines from the analysis stream', async () => {
-    const { fixture, compiled, parse, streamAnalysis } = await setup();
-    parse.mockResolvedValue(completePosition);
-    streamAnalysis.mockImplementation(
-      async (_request: unknown, onEvent: (event: unknown) => void) => {
         onEvent({
           type: 'news',
           news: [
             {
-              title: 'SPY edges higher as breadth improves',
-              url: 'https://example.com/spy-news',
+              title: 'AAPL edges higher',
+              url: 'https://example.com/aapl',
               publisher: 'Newswire',
               published_at: null,
             },
@@ -387,35 +379,210 @@ describe('AnalysisChat', () => {
       },
     );
 
-    typeMessage(compiled, 'buy call XSP 600 2030-11-15');
+    typeMessage(compiled, 'лонг колл');
     submit(fixture, compiled);
     await settle(fixture);
 
-    expect(compiled.querySelector('.news-context a')?.getAttribute('href')).toBe(
-      'https://example.com/spy-news',
+    expect(compiled.querySelector('.message-role')?.textContent).toContain('Ассистент');
+    expect(compiled.querySelector('.message-user .message-role')?.textContent).toContain(
+      'Вы',
     );
-    expect(compiled.querySelector('.news-context')?.textContent).toContain('not a calendar');
+    expect(compiled.querySelector('.draft-card')?.textContent).toContain(
+      'Готово к анализу',
+    );
+    expect(compiled.querySelector('.draft-card')?.textContent).toContain(
+      'Предложено по живой цепочке',
+    );
+
+    button(compiled, 'Analyze')!.click();
+    await settle(fixture);
+
+    expect(compiled.querySelector('.activity-timeline')?.textContent).toContain(
+      '260 дневных свечей',
+    );
+    expect(compiled.querySelector('.news-context')?.textContent).toContain(
+      'Свежие заголовки',
+    );
   });
 
-  it('shows an unsupported parse refusal in the chat without a retry', async () => {
-    const { fixture, compiled, parse } = await setup();
-    parse.mockRejectedValue(
-      new HttpErrorResponse({
-        status: 422,
-        error: {
-          detail: 'I can only analyze one option or one two-leg vertical spread per message.',
-        },
-      }),
-    );
+  it('uses the inferred intent for the analysis request', async () => {
+    const { fixture, compiled, chatTurn, streamAnalysis } = await setup();
+    chatTurn.mockResolvedValue({ ...confirmResponse, intent: 'close' });
 
-    typeMessage(compiled, 'analyze SPY and QQQ');
+    typeMessage(compiled, 'close my long call');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    button(compiled, 'Analyze')!.click();
+    await settle(fixture);
+
+    const request = streamAnalysis.mock.calls[0]?.[0] as { intent: string };
+    expect(request.intent).toBe('close');
+  });
+
+  it('sends a wider-by-two edit through the chat turn', async () => {
+    const { fixture, compiled, chatTurn } = await setup();
+    chatTurn.mockResolvedValue(spreadConfirmResponse);
+
+    typeMessage(compiled, 'bull put spread');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    button(compiled, 'Wider by 2')!.click();
+    await settle(fixture);
+
+    expect(chatTurn).toHaveBeenCalledTimes(2);
+    const secondRequest = chatTurn.mock.calls[1]?.[0] as ChatTurnRequest;
+    expect(secondRequest.message).toBe('wider by 2');
+    expect(secondRequest.draft?.legs).toHaveLength(2);
+  });
+
+  it('clears the draft on a plain cancel without a chat turn', async () => {
+    const { fixture, compiled, chatTurn } = await setup();
+
+    typeMessage(compiled, 'long call');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    typeMessage(compiled, 'cancel');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    expect(chatTurn).toHaveBeenCalledTimes(1);
+    expect(compiled.querySelector('.draft-card')).toBeNull();
+    expect(compiled.querySelector('.chat-log')?.textContent).toContain('Draft cancelled');
+  });
+
+  it('switches immediately for an explicit command response', async () => {
+    const { fixture, compiled, chatTurn, preferences } = await setup();
+    chatTurn.mockResolvedValue(explicitSwitchResponse);
+
+    typeMessage(compiled, 'show MSFT chart');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    expect(preferences.symbol()).toBe('MSFT');
+    expect(compiled.querySelector('.switch-card')).toBeNull();
+  });
+
+  it('asks before switching for an exploratory question', async () => {
+    const { fixture, compiled, chatTurn, preferences } = await setup();
+    chatTurn.mockResolvedValue(switchResponse);
+
+    typeMessage(compiled, 'what about MSFT?');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    expect(preferences.symbol()).toBe('AAPL');
+    expect(compiled.querySelector('.switch-card')?.textContent).toContain('Switch to MSFT');
+
+    button(compiled, 'Switch to MSFT')!.click();
+    await settle(fixture);
+
+    expect(preferences.symbol()).toBe('MSFT');
+  });
+
+  it('shows a refusal without offering a retry', async () => {
+    const { fixture, compiled, chatTurn } = await setup();
+    chatTurn.mockResolvedValue(refusedResponse);
+
+    typeMessage(compiled, 'write a poem');
     submit(fixture, compiled);
     await settle(fixture);
 
     expect(compiled.querySelector('.chat-log')?.textContent).toContain(
-      'one two-leg vertical spread',
+      "I can help with this instrument's chart",
     );
     expect(button(compiled, 'Retry failed step')).toBeUndefined();
+  });
+
+  it('retries a failed chat turn without duplicating the user message', async () => {
+    const { fixture, compiled, chatTurn } = await setup();
+    chatTurn.mockRejectedValueOnce(quotaError).mockResolvedValue(answerResponse);
+
+    typeMessage(compiled, 'hello');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    expect(compiled.querySelectorAll('.message-user')).toHaveLength(1);
+    expect(compiled.querySelector('.error')?.textContent).toContain('quota');
+
+    button(compiled, 'Retry failed step')!.click();
+    await settle(fixture);
+
+    expect(chatTurn).toHaveBeenCalledTimes(2);
+    expect(compiled.querySelectorAll('.message-user')).toHaveLength(1);
+    expect(compiled.querySelector('.error')).toBeNull();
+  });
+
+  it('retries only the analysis after an analysis failure', async () => {
+    const { fixture, compiled, chatTurn, streamAnalysis } = await setup();
+    streamAnalysis.mockRejectedValueOnce(quotaError).mockResolvedValue(analysisStub);
+
+    typeMessage(compiled, 'long call');
+    submit(fixture, compiled);
+    await settle(fixture);
+    button(compiled, 'Analyze')!.click();
+    await settle(fixture);
+
+    expect(chatTurn).toHaveBeenCalledTimes(1);
+    expect(streamAnalysis).toHaveBeenCalledTimes(1);
+    expect(compiled.querySelector('.error')?.textContent).toContain('quota');
+
+    button(compiled, 'Retry failed step')!.click();
+    await settle(fixture);
+
+    expect(chatTurn).toHaveBeenCalledTimes(1);
+    expect(streamAnalysis).toHaveBeenCalledTimes(2);
+    expect(compiled.querySelector('.analysis-card')).not.toBeNull();
+    expect(compiled.querySelectorAll('.message-user')).toHaveLength(2);
+  });
+
+  it('copies a previous user message back into the chat input', async () => {
+    const { fixture, compiled, chatTurn } = await setup();
+
+    typeMessage(compiled, 'hello');
+    submit(fixture, compiled);
+    await settle(fixture);
+
+    const edit = compiled.querySelector<HTMLButtonElement>(
+      'button[aria-label="Edit message in the chat input"]',
+    );
+    expect(edit).not.toBeNull();
+    edit!.click();
+    fixture.detectChanges();
+
+    const textarea = compiled.querySelector<HTMLTextAreaElement>('.chat-form textarea');
+    expect(textarea?.value).toBe('hello');
+    expect(chatTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends on Enter and keeps Shift+Enter for a new line', async () => {
+    const { fixture, compiled, chatTurn } = await setup();
+    typeMessage(compiled, 'hello');
+    const textarea = compiled.querySelector<HTMLTextAreaElement>('.chat-form textarea')!;
+
+    textarea.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    fixture.detectChanges();
+    expect(chatTurn).not.toHaveBeenCalled();
+
+    textarea.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Enter',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+    fixture.detectChanges();
+
+    expect(chatTurn).toHaveBeenCalledTimes(1);
   });
 
   it('sizes the conversation to its content up to the saved maximum', async () => {
@@ -451,8 +618,8 @@ describe('AnalysisChat', () => {
   });
 
   it('keeps the latest message in view unless the user scrolled away', async () => {
-    const { fixture, compiled, parse } = await setup();
-    parse.mockResolvedValue(missingStrike);
+    const { fixture, compiled, chatTurn } = await setup();
+    chatTurn.mockResolvedValue(answerResponse);
     const log = compiled.querySelector<HTMLElement>('.chat-log');
     expect(log).not.toBeNull();
     Object.defineProperty(log!, 'scrollHeight', { configurable: true, value: 1_000 });
@@ -462,7 +629,7 @@ describe('AnalysisChat', () => {
     log!.dispatchEvent(new Event('scroll'));
     fixture.detectChanges();
 
-    typeMessage(compiled, 'buy call XSP 2030-11-15');
+    typeMessage(compiled, 'hello');
     submit(fixture, compiled);
     await fixture.whenStable();
     fixture.detectChanges();
@@ -474,33 +641,5 @@ describe('AnalysisChat', () => {
     fixture.detectChanges();
 
     expect(log!.scrollTop).toBe(1_000);
-
-    typeMessage(compiled, 'the strike is 600');
-    submit(fixture, compiled);
-    await fixture.whenStable();
-    fixture.detectChanges();
-
-    expect(log!.scrollTop).toBe(1_000);
-  });
-
-  it('scrolls to the latest message when Analyze is clicked', async () => {
-    const { fixture, compiled, parse } = await setup();
-    const log = compiled.querySelector<HTMLElement>('.chat-log');
-    expect(log).not.toBeNull();
-    Object.defineProperty(log!, 'scrollHeight', { configurable: true, value: 1_000 });
-    Object.defineProperty(log!, 'clientHeight', { configurable: true, value: 200 });
-    log!.scrollTop = 0;
-    log!.dispatchEvent(new Event('scroll'));
-    fixture.detectChanges();
-
-    typeMessage(compiled, 'buy call XSP 600');
-    fixture.detectChanges();
-    button(compiled, 'Analyze')!.click();
-    fixture.detectChanges();
-
-    expect(parse).toHaveBeenCalledTimes(1);
-    expect(log!.scrollTop).toBe(1_000);
-
-    button(compiled, 'Cancel')!.click();
   });
 });

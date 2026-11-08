@@ -165,6 +165,99 @@ export type AnalysisStreamEvent =
   | AnalysisErrorEvent
   | AnalysisHeartbeatEvent;
 
+export type ChatMode = 'answer' | 'draft' | 'confirm' | 'switch_symbol' | 'refused';
+
+export interface ChatDraftLeg {
+  symbol: string;
+  side: OptionSide | null;
+  option_type: OptionType | null;
+  strike: number | null;
+  expiration: string | null;
+}
+
+export interface ChatDraft {
+  position_type: 'single' | 'strategy';
+  legs: ChatDraftLeg[];
+  strategy_key?: string | null;
+  reference?: ReferenceEdit | null;
+  intent?: Intent | null;
+}
+
+export interface ChatDraftSuggestions {
+  fields: string[];
+  expiration: string | null;
+  strike: number | null;
+  long_strike: number | null;
+  width: number | null;
+}
+
+export interface ChatSwitch {
+  symbol: string;
+  explicit: boolean;
+  reason: string;
+}
+
+export interface ChatConfirm {
+  summary: string;
+  position: AnalysisPosition;
+}
+
+export interface ChatHistoryTurn {
+  role: 'user' | 'assistant';
+  text: string;
+}
+
+export interface ChatMarketSnapshot {
+  symbol: string;
+  price: number | null;
+  change_pct: number | null;
+  vix: number | null;
+  support: number[];
+  resistance: number[];
+  candles: Candle[];
+  sma: IndicatorSeries[];
+  rsi: IndicatorSeries;
+  news: NewsHeadline[];
+  range: ChartRange;
+  chart_source: 'twelve_data' | 'cboe_index_history' | null;
+  chart_as_of: string | null;
+  as_of: string | null;
+  quote_as_of: string | null;
+  vix_as_of: string | null;
+  news_as_of: string | null;
+  sources: MarketSources;
+  degraded: boolean;
+  warnings: string[];
+}
+
+export interface ChatTurnRequest {
+  symbol: string;
+  message: string;
+  intent: Intent;
+  language: string;
+  history: ChatHistoryTurn[];
+  draft: ChatDraft | null;
+  context: AnalysisPosition[];
+  continuation: boolean;
+  market: ChatMarketSnapshot;
+}
+
+export interface ChatTurnResponse {
+  mode: ChatMode;
+  text: string;
+  language: string;
+  intent: Intent;
+  draft: ChatDraft | null;
+  missing: string[];
+  suggestions: ChatDraftSuggestions | null;
+  confirm: ChatConfirm | null;
+  switch: ChatSwitch | null;
+  pending_draft: ChatDraft | null;
+  as_of: string | null;
+  degraded: boolean;
+  warnings: string[];
+}
+
 export interface ExampleResponse {
   symbol: string;
   message: string;

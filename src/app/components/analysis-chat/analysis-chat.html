@@ -1,7 +1,7 @@
 <section class="chat-card" [class.chat-card-resizing]="resizing()" aria-labelledby="chat-title">
   <header class="chat-header">
     <div>
-      <h2 id="chat-title">Strategy analysis chat</h2>
+      <h2 id="chat-title">Market chat</h2>
       <p class="chat-meta">
         Instrument: {{ symbol() }} · answers in your language · educational only
       </p>
@@ -31,7 +31,7 @@
         <article class="message" [class.message-user]="message.role === 'user'">
           <div class="message-head">
             <span class="message-role">
-              {{ message.role === 'user' ? 'You' : 'Assistant' }}
+              {{ message.role === 'user' ? copy().you : copy().assistant }}
             </span>
             @if (message.role === 'user' && message.text) {
               <button
@@ -58,30 +58,14 @@
             }
           }
           @if (message.position; as position) {
-            <div
-              class="position-summary"
-              [class.position-summary-provisional]="position.provisional"
-              role="status"
-            >
-              <span class="position-label">
-                {{ position.provisional ? 'Understood' : 'Position' }}
-              </span>
+            <div class="position-summary" role="status">
+              <span class="position-label">{{ copy().position }}</span>
               <strong>{{ position.header }}</strong>
-              @if (!position.provisional) {
-                <ul class="position-legs" aria-label="Position legs">
-                  @for (leg of position.legs; track $index) {
-                    <li>
-                      {{ leg.side ?? '—' }}
-                      {{ leg.strike ?? '—' }}
-                      {{ leg.option_type ?? '—' }}
-                      {{ leg.expiration ?? '—' }}
-                    </li>
-                  }
-                </ul>
-              }
-              @if (position.provisional) {
-                <span class="position-note">Resolving listed strikes…</span>
-              }
+              <ul class="position-legs" aria-label="Position legs">
+                @for (leg of position.legs; track $index) {
+                  <li>{{ legText(leg) }}</li>
+                }
+              </ul>
             </div>
           }
           @if (message.activities?.length) {
@@ -105,7 +89,7 @@
           }
           @if (message.news?.length) {
             <div class="news-context">
-              <span class="news-caption">Recent headlines (context, not a calendar)</span>
+              <span class="news-caption">{{ copy().newsCaption }}</span>
               <ul>
                 @for (headline of message.news; track headline.url) {
                   <li>
@@ -157,6 +141,109 @@
     </div>
   </div>
 
+  @if (switchProposal(); as proposal) {
+    <div class="chat-action-panel switch-card" role="group" aria-label="Instrument switch">
+      <div>
+        <span class="action-eyebrow">{{ copy().switchTitle }}</span>
+        <p class="action-title">Switch to {{ proposal.symbol }}?</p>
+        <p class="action-copy">
+          The chart is showing {{ symbol() }}. Switching will load {{ proposal.symbol }}'s price,
+          levels, chart, and news.
+        </p>
+      </div>
+      <div class="action-buttons">
+        <button type="button" class="button button-primary" (click)="switchNow()">
+          Switch to {{ proposal.symbol }}
+        </button>
+        <button type="button" class="button" (click)="stayOnSymbol()">
+          Stay on {{ symbol() }}
+        </button>
+      </div>
+    </div>
+  }
+
+  @if (draft(); as activeDraft) {
+    <div class="chat-action-panel draft-card" role="group" aria-label="Option draft">
+      <div class="draft-head">
+        <div>
+          <span class="action-eyebrow">
+            {{ mode() === 'confirm' ? copy().readyToAnalyze : copy().optionDraft }}
+          </span>
+          <p class="action-title">{{ draftTitle() }}</p>
+        </div>
+        @if (confirm(); as confirmed) {
+          <span class="draft-status">{{ confirmed.summary }}</span>
+        }
+      </div>
+      <ul class="draft-legs" aria-label="Draft legs">
+        @for (leg of activeDraft.legs; track $index) {
+          <li>
+            <span class="draft-leg-index">{{ $index + 1 }}</span>
+            <span>{{ legText(leg) }}</span>
+            @if (
+              leg.side === null ||
+              leg.option_type === null ||
+              leg.strike === null ||
+              leg.expiration === null
+            ) {
+              <span class="draft-missing">{{ copy().needsValue }}</span>
+            }
+          </li>
+        }
+      </ul>
+      @if (suggestedLabel()) {
+        <p class="suggestion-note">{{ copy().suggestedNote(suggestedLabel()) }}</p>
+      }
+      @if (missingLabel()) {
+        <p class="draft-missing-note">{{ copy().stillNeeded(missingLabel()) }}</p>
+      }
+      @if (draftWarnings().length) {
+        <ul class="draft-warnings" aria-label="Draft data warnings">
+          @for (warning of draftWarnings(); track warning) {
+            <li>{{ chatWarningLabel(warning) }}</li>
+          }
+        </ul>
+      }
+      <div class="action-buttons">
+        @if (confirm()) {
+          <button
+            type="button"
+            class="button button-primary"
+            (click)="acceptDraft()"
+            [disabled]="busy()"
+          >
+            Analyze
+          </button>
+        } @else if (hasSuggestions()) {
+          <button
+            type="button"
+            class="button button-primary"
+            (click)="acceptDraft()"
+            [disabled]="busy()"
+          >
+            Use these
+          </button>
+        }
+        @if (isSpread()) {
+          <button type="button" class="button" (click)="widenDraft()" [disabled]="busy()">
+            Wider by 2
+          </button>
+        }
+        @if (canNarrow()) {
+          <button type="button" class="button" (click)="narrowDraft()" [disabled]="busy()">
+            Narrow by 1
+          </button>
+        }
+        <button type="button" class="button" (click)="changeDraft()" [disabled]="busy()">
+          Change
+        </button>
+        <button type="button" class="button button-quiet" (click)="startOver()" [disabled]="busy()">
+          Start over
+        </button>
+      </div>
+    </div>
+  }
+
   @if (error(); as message) {
     <div class="chat-error" role="alert">
       <p class="error">{{ message }}</p>
@@ -169,33 +256,23 @@
   }
 
   <form class="chat-form" (submit)="send($event)">
-    <label class="field">
-      <span>Intent</span>
-      <select
-        [value]="intent()"
-        (change)="setIntent($event)"
-        title="Used in the assessment and shown on each analysis card."
-      >
-        <option value="open">Open</option>
-        <option value="close">Close</option>
-        <option value="roll">Roll</option>
-      </select>
-    </label>
     <label class="field chat-input">
-      <span>Your position</span>
+      <span>Message</span>
       <textarea
         #chatInput
         rows="2"
-        [value]="draft()"
+        maxlength="2000"
+        [value]="draftText()"
         (input)="updateDraft($event)"
         (keydown)="onKeydown($event)"
         aria-keyshortcuts="Enter"
         title="Enter sends. Shift+Enter adds a new line."
-        placeholder="Example: sell 732 put and buy 729 put XSP 2026-11-20"
+        placeholder="Ask about the trend, patterns, levels, or news, or describe an option…"
       ></textarea>
     </label>
     <div class="chat-actions">
       @if (busy()) {
+        <span class="chat-thinking" role="status">{{ copy().thinking }}</span>
         <button type="button" class="button button-quiet" (click)="cancel()">Cancel</button>
       }
       <button
@@ -204,7 +281,7 @@
         [disabled]="!canSend()"
         (click)="scrollToLatestOnAnalyze()"
       >
-        Analyze
+        Send
       </button>
     </div>
   </form>

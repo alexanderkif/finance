@@ -4,6 +4,7 @@ import {
   ElementRef,
   afterRenderEffect,
   computed,
+  effect,
   inject,
   input,
   signal,
@@ -14,12 +15,16 @@ import {
   AnalysisPosition,
   AnalysisResult,
   AnalysisStreamEvent,
+  ChatConfirm,
+  ChatDraft,
+  ChatDraftSuggestions,
+  ChatHistoryTurn,
+  ChatMarketSnapshot,
+  ChatSwitch,
+  ChatTurnResponse,
   Intent,
   NewsHeadline,
-  ParseResponse,
-  ParsedLeg,
   PositionLeg,
-  ReferenceEdit,
 } from '../../models/market-data';
 import { MarketApi, isAbortError, requestAbortedError } from '../../services/market-data';
 import {
@@ -29,10 +34,24 @@ import {
   Preferences,
   clampChatHeight,
 } from '../../services/preferences';
+import { formatPrice } from '../../price-format';
 import { warningLabel } from '../../warning-labels';
 import { AnalysisCard } from '../analysis-card/analysis-card';
+import {
+  ChatCopy,
+  ENGLISH_COPY,
+  ENGLISH_GREETING,
+  RUSSIAN_GREETING,
+  RUSSIAN_COPY,
+  RUSSIAN_FIELD_LABELS,
+  RUSSIAN_STAGE_LABELS,
+  RUSSIAN_STAGE_PATTERNS,
+  RUSSIAN_SUGGESTION_FIELDS,
+  RUSSIAN_WARNINGS,
+} from './chat-copy';
 
 type ActivityState = 'running' | 'done' | 'failed';
+type ChatMode = 'explore' | 'draft' | 'confirm' | 'switch';
 
 interface ChatActivity {
   id: string;
@@ -43,7 +62,7 @@ interface ChatActivity {
 
 interface PositionSummary {
   header: string;
-  legs: ParsedLeg[];
+  legs: PositionLeg[];
   provisional: boolean;
 }
 
@@ -57,23 +76,33 @@ interface ChatMessage {
   news?: NewsHeadline[];
 }
 
-type RunAction = {
-  kind: 'run';
-  turnId: number;
-  parsed: ParseResponse;
-  position: AnalysisPosition | null;
-  context: AnalysisPosition[];
-  reference: ReferenceEdit | null;
-  intent: Intent;
-};
-
 type RetryAction =
-  { kind: 'example' } | { kind: 'parse'; combined: string; turnId: number } | RunAction;
+  | { kind: 'example' }
+  | { kind: 'chat'; text: string; continuation: boolean }
+  | { kind: 'analysis'; position: AnalysisPosition; turnId: number };
 
 const RETRY_DELAYS_MS = [1_200, 3_000] as const;
-const FIELD_PROMPTS: Record<string, string> = {
-  side: 'whether each leg is a buy or sell',
-  option_type: 'whether each leg is a call or a put',
+const YES_PATTERN =
+  /^(?:yes|y|yeah|yep|ok|okay|sure|go\s+ahead|use\s+these|use\s+it|do\s+it|analy[sz]e|да|ок|хорошо|верно|давай|подходит)[.!]?$/i;
+const CANCEL_PATTERN =
+  /^(?:cancel|start\s+over|reset|never\s*mind|not\s+now|forget\s+it|drop\s+it|отмена|начать\s+заново|сброс|не\s+сейчас|забудь)[.!]?$/i;
+const INITIAL_MESSAGE =
+  "Hi — I can explain the selected instrument's trend, candlestick patterns, " +
+  'key levels, VIX context, and recent headlines, or help you build an option ' +
+  'card. What would you like to look at?';
+const STRATEGY_LABELS: Record<string, string> = {
+  bull_put_spread: 'Bull Put Spread',
+  bear_call_spread: 'Bear Call Spread',
+  bull_call_spread: 'Bull Call Spread',
+  bear_put_spread: 'Bear Put Spread',
+  long_call: 'Long Call',
+  long_put: 'Long Put',
+  short_call: 'Short Call',
+  short_put: 'Short Put',
+};
+const FIELD_LABELS: Record<string, string> = {
+  side: 'whether the option is a buy or a sell',
+  option_type: 'whether it is a call or a put',
   strike: 'the strike price',
   expiration: 'the expiration date',
   strategy_type: 'which two-leg spread you mean',
@@ -92,37 +121,94 @@ export class AnalysisChat {
   private readonly chatInput = viewChild<ElementRef<HTMLTextAreaElement>>('chatInput');
   private readonly scrollPinned = signal(true);
   private readonly contextStack: AnalysisPosition[] = [];
+  private history: ChatHistoryTurn[] = [];
   private resizeStart: { y: number; height: number } | null = null;
   private activeRequest: AbortController | null = null;
   private exampleRequest: AbortController | null = null;
   private activeTurnId: number | null = null;
   private nextMessageId = 1;
   private retrySequence = 0;
+  private continuationInFlight = false;
+  private previousSymbol: string | null = null;
+  private readonly detectedLanguage = signal('English');
+  private analysisIntent: Intent = 'open';
+
+  readonly symbol = input.required<string>();
+  readonly snapshot = input<ChatMarketSnapshot | null>(null);
 
   protected readonly chatHeight = this.preferences.chatHeight;
   protected readonly minChatHeight = MIN_CHAT_HEIGHT_PX;
   protected readonly maxChatHeight = MAX_CHAT_HEIGHT_PX;
   protected readonly resizing = signal(false);
-
-  readonly symbol = input.required<string>();
+  protected readonly formatPrice = formatPrice;
 
   protected readonly messages = signal<ChatMessage[]>([
-    {
-      id: 0,
-      role: 'assistant',
-      text:
-        'Describe a single option or a two-leg vertical spread. I will ask only ' +
-        'for the fields that are missing.',
-    },
+    { id: 0, role: 'assistant', text: ENGLISH_GREETING },
   ]);
-  protected readonly draft = signal('');
-  protected readonly intent = signal<Intent>('open');
+  protected readonly draftText = signal('');
   protected readonly busy = signal(false);
   protected readonly exampleBusy = signal(false);
   protected readonly error = signal<string | null>(null);
-  protected readonly pending = signal<{ text: string; missing: string[] } | null>(null);
   protected readonly retryable = signal<RetryAction | null>(null);
-  protected readonly canSend = computed(() => this.draft().trim().length > 0);
+  protected readonly mode = signal<ChatMode>('explore');
+  protected readonly draft = signal<ChatDraft | null>(null);
+  protected readonly suggestions = signal<ChatDraftSuggestions | null>(null);
+  protected readonly missing = signal<string[]>([]);
+  protected readonly draftWarnings = signal<string[]>([]);
+  protected readonly confirm = signal<ChatConfirm | null>(null);
+  protected readonly switchProposal = signal<ChatSwitch | null>(null);
+  protected readonly pendingDraftAfterSwitch = signal<ChatDraft | null>(null);
+  protected readonly isRussian = computed(() =>
+    this.detectedLanguage().toLowerCase().startsWith('russ'),
+  );
+  protected readonly copy = computed<ChatCopy>(() =>
+    this.isRussian() ? RUSSIAN_COPY : ENGLISH_COPY,
+  );
+  protected readonly canSend = computed(() => this.draftText().trim().length > 0);
+  protected readonly isSpread = computed(() => (this.draft()?.legs.length ?? 0) === 2);
+  protected readonly canNarrow = computed(() => {
+    if (!this.isSpread()) {
+      return false;
+    }
+    const width = this.suggestions()?.width;
+    return width === null || width === undefined || width > 1;
+  });
+  protected readonly hasSuggestions = computed(() => (this.suggestions()?.fields.length ?? 0) > 0);
+  protected readonly draftTitle = computed(() => {
+    const active = this.draft();
+    if (!active) {
+      return 'Option draft';
+    }
+    if (active.strategy_key && STRATEGY_LABELS[active.strategy_key]) {
+      return STRATEGY_LABELS[active.strategy_key];
+    }
+    return active.legs.length === 1
+      ? this.copy().singleOption
+      : this.copy().twoLegSpread;
+  });
+  protected readonly suggestedLabel = computed(() => {
+    const fields = this.suggestions()?.fields ?? [];
+    const localized = this.isRussian() ? RUSSIAN_SUGGESTION_FIELDS : null;
+    return fields
+      .map(
+        (field) =>
+          localized?.[field] ??
+          (field === 'long_strike'
+            ? 'long strike'
+            : field === 'option_type'
+              ? 'option type'
+              : field),
+      )
+      .join(', ');
+  });
+  protected readonly missingLabel = computed(() => {
+    const missing = this.missing();
+    if (missing.length === 0) {
+      return '';
+    }
+    const labels = this.isRussian() ? RUSSIAN_FIELD_LABELS : FIELD_LABELS;
+    return missing.map((field) => labels[field] ?? field).join(', ');
+  });
   protected readonly errorMessage = errorMessage;
   protected readonly warningLabel = warningLabel;
 
@@ -137,12 +223,55 @@ export class AnalysisChat {
         }
       },
     });
+
+    effect(() => {
+      const pending = this.pendingDraftAfterSwitch();
+      const snapshot = this.snapshot();
+      if (!pending || !snapshot || this.continuationInFlight || this.busy()) {
+        return;
+      }
+      const symbol = pending.legs[0]?.symbol;
+      if (!symbol || snapshot.symbol !== symbol) {
+        return;
+      }
+      this.continuationInFlight = true;
+      this.pendingDraftAfterSwitch.set(null);
+      this.draft.set(pending);
+      this.mode.set('draft');
+      void this.sendTurn('continue', { continuation: true, recordUser: false }).finally(() => {
+        this.continuationInFlight = false;
+      });
+    });
+
+    effect(() => {
+      const symbol = this.symbol();
+      if (this.previousSymbol !== null && this.previousSymbol !== symbol) {
+        this.history = [];
+        this.cancelRunningActivities();
+        this.activeRequest?.abort();
+        this.activeRequest = null;
+        this.busy.set(false);
+        this.error.set(null);
+        this.retryable.set(null);
+        this.switchProposal.set(null);
+        if (!this.pendingDraftAfterSwitch()) {
+          this.draft.set(null);
+          this.suggestions.set(null);
+          this.missing.set([]);
+          this.draftWarnings.set([]);
+          this.confirm.set(null);
+          this.mode.set('explore');
+        }
+        this.addAssistantMessage(this.copy().nowWatching(symbol));
+      }
+      this.previousSymbol = symbol;
+    });
   }
 
   protected updateDraft(event: Event): void {
     const target = event.target;
     if (target instanceof HTMLTextAreaElement) {
-      this.draft.set(target.value);
+      this.draftText.set(target.value);
     }
   }
 
@@ -158,8 +287,7 @@ export class AnalysisChat {
     if (!text) {
       return;
     }
-    this.draft.set(text);
-    this.pending.set(null);
+    this.draftText.set(text);
     this.error.set(null);
     this.retryable.set(null);
     this.chatInput()?.nativeElement.focus();
@@ -239,16 +367,6 @@ export class AnalysisChat {
     this.preferences.setChatHeight(DEFAULT_CHAT_HEIGHT_PX);
   }
 
-  protected setIntent(event: Event): void {
-    const target = event.target;
-    if (target instanceof HTMLSelectElement) {
-      const value = target.value;
-      if (value === 'open' || value === 'close' || value === 'roll') {
-        this.intent.set(value);
-      }
-    }
-  }
-
   protected cancel(): void {
     this.cancelRunningActivities();
     this.activeRequest?.abort();
@@ -272,20 +390,16 @@ export class AnalysisChat {
       await this.useExample();
       return;
     }
-
-    const controller = this.startChatRequest();
-    this.activeTurnId = action.turnId;
-    this.busy.set(true);
-    try {
-      if (action.kind === 'parse') {
-        await this.parseAndAnalyze(controller, action.combined, action.turnId);
-      } else {
-        this.resetActivities(action.turnId);
-        await this.runAnalysisStage(controller, action);
-      }
-    } finally {
-      this.finishChat(controller);
+    if (action.kind === 'chat') {
+      this.retryable.set(null);
+      await this.sendTurn(action.text, {
+        continuation: action.continuation,
+        recordUser: false,
+      });
+      return;
     }
+    this.retryable.set(null);
+    await this.runAnalysis(action.position, action.turnId);
   }
 
   protected async useExample(): Promise<void> {
@@ -311,11 +425,19 @@ export class AnalysisChat {
       if (controller.signal.aborted) {
         return;
       }
-      this.draft.set(example.message);
+      this.draft.set(null);
+      this.suggestions.set(null);
+      this.missing.set([]);
+      this.draftWarnings.set([]);
+      this.confirm.set(null);
+      this.switchProposal.set(null);
+      this.pendingDraftAfterSwitch.set(null);
+      this.mode.set('explore');
+      this.draftText.set(example.message);
       await this.send();
     } catch (error) {
       if (!controller.signal.aborted && !isAbortError(error)) {
-        this.error.set(this.errorMessage(error));
+        this.error.set(this.errorMessage(error, this.detectedLanguage()));
         this.retryable.set(this.canRetryAfter(error) ? { kind: 'example' } : null);
       }
     } finally {
@@ -328,25 +450,439 @@ export class AnalysisChat {
 
   protected async send(event?: Event): Promise<void> {
     event?.preventDefault();
-    const text = this.draft().trim();
+    const text = this.draftText().trim();
+    if (this.mode() === 'confirm' && this.confirm() && this.isYes(text)) {
+      const turnId = this.addUserMessage('Yes');
+      this.pushHistory({ role: 'user', text: 'Yes' });
+      this.draftText.set('');
+      await this.runConfirmed(turnId);
+      return;
+    }
     if (!text) {
       return;
     }
-    const combined = this.pending() ? `${this.pending()!.text} ${text}` : text;
-    const turnId = this.nextMessageId++;
+    if (this.isCancel(text) && this.mode() !== 'explore') {
+      this.addUserMessage(text);
+      this.pushHistory({ role: 'user', text });
+      this.draftText.set('');
+      this.clearDraftWithMessage();
+      return;
+    }
+    this.draftText.set('');
+    await this.sendTurn(text);
+  }
+
+  protected acceptDraft(): void {
+    if (this.confirm()) {
+      void this.runConfirmed();
+      return;
+    }
+    void this.sendTurn('use these values');
+  }
+
+  protected widenDraft(): void {
+    void this.sendTurn('wider by 2');
+  }
+
+  protected narrowDraft(): void {
+    void this.sendTurn('narrow by 1');
+  }
+
+  protected changeDraft(): void {
+    this.chatInput()?.nativeElement.focus();
+  }
+
+  protected startOver(): void {
+    if (this.busy()) {
+      return;
+    }
+    this.clearDraftWithMessage();
+  }
+
+  protected switchNow(): void {
+    const proposal = this.switchProposal();
+    if (proposal) {
+      this.performSwitch(proposal.symbol);
+    }
+  }
+
+  protected stayOnSymbol(): void {
+    const proposal = this.switchProposal();
+    this.switchProposal.set(null);
+    this.pendingDraftAfterSwitch.set(null);
+    this.mode.set('explore');
+    if (proposal) {
+      this.addAssistantMessage(this.copy().staying(this.symbol()));
+    }
+  }
+
+  protected legText(leg: PositionLeg | ChatDraft['legs'][number]): string {
+    const strike = leg.strike === null ? '—' : this.formatPrice(leg.strike);
+    return `${leg.side ?? '—'} ${leg.option_type ?? '—'} ${strike} ${leg.expiration ?? '—'}`;
+  }
+
+  private isYes(text: string): boolean {
+    return YES_PATTERN.test(text);
+  }
+
+  private isCancel(text: string): boolean {
+    return CANCEL_PATTERN.test(text);
+  }
+
+  private clearDraftWithMessage(): void {
+    this.draft.set(null);
+    this.suggestions.set(null);
+    this.missing.set([]);
+    this.draftWarnings.set([]);
+    this.confirm.set(null);
+    this.switchProposal.set(null);
+    this.pendingDraftAfterSwitch.set(null);
+    this.mode.set('explore');
+    this.addAssistantMessage(this.copy().draftCancelled(this.symbol()));
+  }
+
+  private async sendTurn(
+    text: string,
+    options: { continuation?: boolean; recordUser?: boolean } = {},
+  ): Promise<void> {
+    const continuation = options.continuation ?? false;
+    const recordUser = options.recordUser ?? true;
+    const turnId = recordUser ? this.addUserMessage(text) : this.nextMessageId++;
+    this.busy.set(true);
+    this.error.set(null);
+    this.retryable.set(null);
     const controller = this.startChatRequest();
     this.activeTurnId = turnId;
-    this.draft.set('');
-    this.messages.update((messages) => [
-      ...messages,
-      { id: turnId, role: 'user', text, activities: [] },
-    ]);
-    this.busy.set(true);
     try {
-      await this.parseAndAnalyze(controller, combined, turnId);
+      const response = await this.withRetry(
+        (signal) => this.api.chatTurn(this.buildChatRequest(text, continuation), signal),
+        controller.signal,
+        'The chat service',
+        (message) => this.addRetryActivity(turnId, message),
+      );
+      if (controller.signal.aborted) {
+        return;
+      }
+      this.completeRunningActivities(turnId);
+      this.handleTurn(response, text, turnId, continuation);
+    } catch (error) {
+      this.markRunningActivitiesFailed(turnId);
+      this.handleChatFailure(controller, error, {
+        kind: 'chat',
+        text,
+        continuation,
+      });
     } finally {
       this.finishChat(controller);
     }
+  }
+
+  private buildChatRequest(
+    text: string,
+    continuation: boolean,
+  ): Parameters<MarketApi['chatTurn']>[0] {
+    return {
+      symbol: this.symbol(),
+      message: text,
+      intent: this.draft()?.intent ?? 'open',
+      language: this.detectedLanguage(),
+      history: this.history.slice(-8),
+      draft: this.draft(),
+      context: [...this.contextStack],
+      continuation,
+      market: this.snapshot() ?? this.emptySnapshot(),
+    };
+  }
+
+  private handleTurn(
+    response: ChatTurnResponse,
+    userText: string,
+    turnId: number,
+    continuation: boolean,
+  ): void {
+    if (!continuation) {
+      this.pushHistory({ role: 'user', text: userText });
+    }
+    this.detectedLanguage.set(response.language || this.detectedLanguage());
+    this.analysisIntent = response.intent || this.analysisIntent || 'open';
+    this.localizeGreeting();
+    if (response.text.trim() && !(response.mode === 'switch_symbol' && response.switch?.explicit)) {
+      this.addAssistantMessage(response.text);
+    }
+    switch (response.mode) {
+      case 'answer':
+        if (response.draft) {
+          this.draft.set(response.draft);
+        }
+        break;
+      case 'draft':
+        this.draft.set(response.draft);
+        this.suggestions.set(response.suggestions);
+        this.missing.set(response.missing);
+        this.draftWarnings.set(response.warnings);
+        this.confirm.set(null);
+        this.mode.set('draft');
+        break;
+      case 'confirm':
+        this.draft.set(response.draft);
+        this.suggestions.set(response.suggestions);
+        this.missing.set([]);
+        this.draftWarnings.set(response.warnings);
+        this.confirm.set(response.confirm);
+        this.mode.set('confirm');
+        break;
+      case 'switch_symbol':
+        if (response.switch) {
+          this.pendingDraftAfterSwitch.set(response.pending_draft);
+          if (response.switch.explicit) {
+            this.performSwitch(response.switch.symbol);
+          } else {
+            this.switchProposal.set(response.switch);
+            this.mode.set('switch');
+          }
+        }
+        break;
+      case 'refused':
+        break;
+    }
+    this.updateTurn(turnId, (message) => ({ ...message }));
+  }
+
+  private async runConfirmed(turnId?: number): Promise<void> {
+    const confirmed = this.confirm();
+    if (!confirmed) {
+      return;
+    }
+    const id = turnId ?? this.addUserMessage('Analyze');
+    if (turnId === undefined) {
+      this.pushHistory({ role: 'user', text: 'Analyze' });
+    }
+    await this.runAnalysis(confirmed.position, id);
+  }
+
+  private async runAnalysis(position: AnalysisPosition, turnId: number): Promise<void> {
+    this.busy.set(true);
+    this.error.set(null);
+    this.retryable.set(null);
+    const controller = this.startChatRequest();
+    this.activeTurnId = turnId;
+    try {
+      const result = await this.withRetry(
+        (signal) =>
+          this.api.streamAnalysis(
+            {
+              position,
+              context: [...this.contextStack],
+              reference: null,
+              intent: this.analysisIntent,
+              detected_language: this.detectedLanguage(),
+            },
+            (event) => this.handleStreamEvent(turnId, event),
+            signal,
+          ),
+        controller.signal,
+        'The analysis service',
+        (message) => this.addRetryActivity(turnId, message),
+      );
+      if (controller.signal.aborted) {
+        return;
+      }
+      this.completeRunningActivities(turnId);
+      this.retryable.set(null);
+      this.addContext(position);
+      this.messages.update((messages) => [
+        ...messages,
+        { id: this.nextMessageId++, role: 'assistant', analysis: result },
+      ]);
+      this.draft.set(null);
+      this.suggestions.set(null);
+      this.missing.set([]);
+      this.draftWarnings.set([]);
+      this.confirm.set(null);
+      this.switchProposal.set(null);
+      this.pendingDraftAfterSwitch.set(null);
+      this.mode.set('explore');
+    } catch (error) {
+      this.markRunningActivitiesFailed(turnId);
+      this.handleChatFailure(controller, error, {
+        kind: 'analysis',
+        position,
+        turnId,
+      });
+    } finally {
+      this.finishChat(controller);
+    }
+  }
+
+  private handleStreamEvent(turnId: number, event: AnalysisStreamEvent): void {
+    if (turnId !== this.activeTurnId) {
+      return;
+    }
+    switch (event.type) {
+      case 'stage':
+        this.upsertActivity(
+          turnId,
+          event.id,
+          this.localizeStageLabel(event.label),
+          event.status === 'started' ? 'running' : event.status === 'done' ? 'done' : 'failed',
+          this.localizeStageDetail(event.detail),
+        );
+        break;
+      case 'position':
+        this.addContext(event.position);
+        this.updateTurn(turnId, (message) => ({
+          ...message,
+          position: {
+            header: event.header,
+            legs: event.position.legs,
+            provisional: false,
+          },
+        }));
+        break;
+      case 'news':
+        this.updateTurn(turnId, (message) => ({ ...message, news: event.news }));
+        break;
+      case 'warning':
+        this.upsertActivity(turnId, `warning-${event.code}`, this.chatWarningLabel(event.code), 'done');
+        break;
+      case 'error':
+        this.upsertActivity(turnId, 'stream-error', this.copy().analysisFailed, 'failed', event.detail);
+        break;
+      case 'heartbeat':
+      case 'result':
+        break;
+    }
+  }
+
+  private handleChatFailure(
+    controller: AbortController,
+    error: unknown,
+    action: RetryAction,
+  ): void {
+    if (controller.signal.aborted || isAbortError(error)) {
+      return;
+    }
+    if (error instanceof HttpErrorResponse && error.status === 422) {
+      this.addAssistantMessage(this.errorMessage(error, this.detectedLanguage()));
+    }
+    this.error.set(this.errorMessage(error, this.detectedLanguage()));
+    this.retryable.set(this.canRetryAfter(error) ? action : null);
+  }
+
+  private canRetryAfter(error: unknown): boolean {
+    if (error instanceof HttpErrorResponse) {
+      return error.status !== 404 && error.status !== 422;
+    }
+    return true;
+  }
+
+  protected chatWarningLabel(code: string): string {
+    if (!this.isRussian()) {
+      return this.warningLabel(code);
+    }
+    return RUSSIAN_WARNINGS[code] ?? code;
+  }
+
+  private localizeStageLabel(label: string): string {
+    if (!this.isRussian()) {
+      return label;
+    }
+    const mapped = RUSSIAN_STAGE_LABELS[label];
+    if (mapped) {
+      return mapped;
+    }
+    for (const [pattern, template] of RUSSIAN_STAGE_PATTERNS) {
+      const match = pattern.exec(label);
+      if (match) {
+        return template.replace('$1', match[1] ?? '').replace('$2', match[2] ?? '');
+      }
+    }
+    return label;
+  }
+
+  private localizeStageDetail(detail?: string): string | undefined {
+    if (!detail || !this.isRussian()) {
+      return detail;
+    }
+    return this.localizeStageLabel(detail);
+  }
+
+  private retryMessage(label: string, delay: number, attempt: number): string {
+    const attemptText = `${attempt + 2}/${RETRY_DELAYS_MS.length + 1}`;
+    const retry = label.toLowerCase().includes('chat')
+      ? this.copy().retryChat
+      : this.copy().retryAnalysis;
+    return retry(delay, attemptText);
+  }
+
+  private localizeGreeting(): void {
+    const greeting = this.isRussian() ? RUSSIAN_GREETING : ENGLISH_GREETING;
+    this.messages.update((messages) =>
+      messages.map((message) =>
+        message.id === 0 && message.role === 'assistant'
+          ? { ...message, text: greeting }
+          : message,
+      ),
+    );
+  }
+
+  private addUserMessage(text: string, activities?: ChatActivity[]): number {
+    const id = this.nextMessageId++;
+    this.messages.update((messages) => [
+      ...messages,
+      { id, role: 'user', text, activities: activities ?? [] },
+    ]);
+    return id;
+  }
+
+  private addAssistantMessage(text: string): number {
+    const id = this.nextMessageId++;
+    this.messages.update((messages) => [...messages, { id, role: 'assistant', text }]);
+    this.pushHistory({ role: 'assistant', text });
+    return id;
+  }
+
+  private pushHistory(turn: ChatHistoryTurn): void {
+    this.history.push(turn);
+    if (this.history.length > 8) {
+      this.history = this.history.slice(-8);
+    }
+  }
+
+  private performSwitch(symbol: string): void {
+    this.switchProposal.set(null);
+    if (symbol === this.symbol()) {
+      this.mode.set('explore');
+      this.addAssistantMessage(this.copy().alreadyShowing(symbol));
+      return;
+    }
+    this.preferences.setSymbol(symbol);
+    this.mode.set(this.pendingDraftAfterSwitch() ? 'draft' : 'explore');
+  }
+
+  private emptySnapshot(): ChatMarketSnapshot {
+    return {
+      symbol: this.symbol(),
+      price: null,
+      change_pct: null,
+      vix: null,
+      support: [],
+      resistance: [],
+      candles: [],
+      sma: [],
+      rsi: { period: 14, points: [] },
+      news: [],
+      range: '6mo',
+      chart_source: null,
+      chart_as_of: null,
+      as_of: null,
+      quote_as_of: null,
+      vix_as_of: null,
+      news_as_of: null,
+      sources: { quote: null, vix: null, news: null },
+      degraded: true,
+      warnings: ['snapshot_unavailable'],
+    };
   }
 
   private startChatRequest(): AbortController {
@@ -368,225 +904,6 @@ export class AnalysisChat {
     }
   }
 
-  private async parseAndAnalyze(
-    controller: AbortController,
-    combined: string,
-    turnId: number,
-  ): Promise<void> {
-    this.upsertActivity(turnId, 'parse', 'Interpreting your request', 'running');
-    let parsed: ParseResponse;
-    try {
-      parsed = await this.withRetry(
-        (signal) => this.api.parse(combined, this.symbol(), signal, [...this.contextStack]),
-        controller.signal,
-        'The analysis service',
-        (message) => this.addRetryActivity(turnId, message),
-      );
-    } catch (error) {
-      this.markRunningActivitiesFailed(turnId);
-      this.handleChatFailure(controller, error, { kind: 'parse', combined, turnId });
-      return;
-    }
-    if (controller.signal.aborted) {
-      return;
-    }
-    this.upsertActivity(
-      turnId,
-      'parse',
-      'Interpreting your request',
-      'done',
-      parsed.header ?? undefined,
-    );
-    this.updateTurn(turnId, (message) => ({
-      ...message,
-      position: this.positionSummary(parsed),
-    }));
-    if (parsed.missing_fields.length > 0) {
-      this.pending.set({ text: combined, missing: parsed.missing_fields });
-      this.messages.update((messages) => [
-        ...messages,
-        {
-          id: this.nextMessageId++,
-          role: 'assistant',
-          text: this.missingFieldsPrompt(parsed.missing_fields),
-        },
-      ]);
-      return;
-    }
-    this.pending.set(null);
-    const position = this.toPosition(parsed);
-    const reference = parsed.reference ?? null;
-    if (!position && !reference) {
-      this.messages.update((messages) => [
-        ...messages,
-        {
-          id: this.nextMessageId++,
-          role: 'assistant',
-          text:
-            'I could not build a complete position from that message. ' +
-            'Please include the side, call or put, strike, and expiration.',
-        },
-      ]);
-      return;
-    }
-    const context = [...this.contextStack];
-    if (reference && context.length === 0) {
-      this.messages.update((messages) => [
-        ...messages,
-        {
-          id: this.nextMessageId++,
-          role: 'assistant',
-          text:
-            'I need the previous position before I can apply that change. ' +
-            'Please describe the full position.',
-        },
-      ]);
-      return;
-    }
-    if (!reference && position) {
-      this.addContext(position);
-    }
-    await this.runAnalysisStage(controller, {
-      kind: 'run',
-      turnId,
-      parsed,
-      position,
-      context,
-      reference,
-      intent: this.intent(),
-    });
-  }
-
-  private async runAnalysisStage(controller: AbortController, action: RunAction): Promise<void> {
-    this.upsertActivity(action.turnId, 'request', 'Contacting the analysis service', 'running');
-    try {
-      const result = await this.withRetry(
-        (signal) =>
-          this.api.streamAnalysis(
-            {
-              position: action.reference ? null : action.position,
-              context: action.context,
-              reference: action.reference,
-              intent: action.intent,
-              detected_language: action.parsed.detected_language,
-            },
-            (event) => this.handleStreamEvent(action.turnId, event),
-            signal,
-          ),
-        controller.signal,
-        'The analysis service',
-        (message) => this.addRetryActivity(action.turnId, message),
-      );
-      if (controller.signal.aborted) {
-        return;
-      }
-      this.completeRunningActivities(action.turnId);
-      this.retryable.set(null);
-      this.messages.update((messages) => [
-        ...messages,
-        { id: this.nextMessageId++, role: 'assistant', analysis: result },
-      ]);
-    } catch (error) {
-      this.markRunningActivitiesFailed(action.turnId);
-      this.handleChatFailure(controller, error, action);
-    }
-  }
-
-  private handleStreamEvent(turnId: number, event: AnalysisStreamEvent): void {
-    if (turnId !== this.activeTurnId) {
-      return;
-    }
-    switch (event.type) {
-      case 'stage':
-        this.upsertActivity(
-          turnId,
-          event.id,
-          event.label,
-          event.status === 'started' ? 'running' : event.status === 'done' ? 'done' : 'failed',
-          event.detail,
-        );
-        break;
-      case 'position':
-        this.addContext(event.position);
-        this.updateTurn(turnId, (message) => ({
-          ...message,
-          position: {
-            header: event.header,
-            legs: event.position.legs,
-            provisional: false,
-          },
-        }));
-        break;
-      case 'news':
-        this.updateTurn(turnId, (message) => ({ ...message, news: event.news }));
-        break;
-      case 'warning':
-        this.upsertActivity(turnId, `warning-${event.code}`, this.warningLabel(event.code), 'done');
-        break;
-      case 'error':
-        this.upsertActivity(turnId, 'stream-error', 'Analysis failed', 'failed', event.detail);
-        break;
-      case 'heartbeat':
-      case 'result':
-        break;
-    }
-  }
-
-  private handleChatFailure(
-    controller: AbortController,
-    error: unknown,
-    action: RetryAction,
-  ): void {
-    if (controller.signal.aborted || isAbortError(error)) {
-      return;
-    }
-    if (error instanceof HttpErrorResponse && error.status === 422) {
-      if (action.kind === 'run') {
-        this.messages.update((messages) => [
-          ...messages,
-          {
-            id: this.nextMessageId++,
-            role: 'assistant',
-            text:
-              'I need a complete, listed position before I can analyse it. ' +
-              'Please check the side, strike, and expiration, then send the ' +
-              'corrected description.',
-          },
-        ]);
-      } else if (action.kind === 'parse') {
-        this.messages.update((messages) => [
-          ...messages,
-          {
-            id: this.nextMessageId++,
-            role: 'assistant',
-            text: this.errorMessage(error),
-          },
-        ]);
-      }
-    }
-    this.error.set(this.errorMessage(error));
-    this.retryable.set(this.canRetryAfter(error) ? action : null);
-  }
-
-  private canRetryAfter(error: unknown): boolean {
-    if (error instanceof HttpErrorResponse) {
-      return error.status !== 404 && error.status !== 422;
-    }
-    return true;
-  }
-
-  private missingFieldsPrompt(missing: string[]): string {
-    const requested = missing.map((field) => FIELD_PROMPTS[field] ?? field);
-    return `I still need ${this.joinWithAnd(requested)} before I can run the analysis.`;
-  }
-
-  private joinWithAnd(items: string[]): string {
-    if (items.length <= 1) {
-      return items[0] ?? 'one more detail';
-    }
-    return `${items.slice(0, -1).join(', ')}, and ${items.at(-1)}`;
-  }
-
   private async withRetry<T>(
     request: (signal: AbortSignal) => Promise<T>,
     signal: AbortSignal,
@@ -601,9 +918,7 @@ export class AnalysisChat {
           throw error;
         }
         const delay = RETRY_DELAYS_MS[attempt];
-        const message =
-          `${label} is unavailable. Retrying in ${this.formatSeconds(delay)} ` +
-          `(attempt ${attempt + 2} of ${RETRY_DELAYS_MS.length + 1})…`;
+        const message = this.retryMessage(label, delay, attempt);
         onRetry?.(message);
         await this.wait(delay, signal);
       }
@@ -627,33 +942,11 @@ export class AnalysisChat {
     });
   }
 
-  private formatSeconds(milliseconds: number): string {
-    const seconds = milliseconds / 1_000;
-    return seconds === 1 ? '1 second' : `${seconds} seconds`;
-  }
-
   private scrollToLatest(): void {
     const element = this.chatLog()?.nativeElement;
     if (element) {
       element.scrollTop = element.scrollHeight;
     }
-  }
-
-  private toPosition(parsed: ParseResponse): AnalysisPosition | null {
-    const legs: PositionLeg[] = [];
-    for (const leg of parsed.legs) {
-      if (!leg.symbol || !leg.side || !leg.option_type || leg.strike === null || !leg.expiration) {
-        return null;
-      }
-      legs.push({
-        symbol: leg.symbol,
-        side: leg.side,
-        option_type: leg.option_type,
-        strike: leg.strike,
-        expiration: leg.expiration,
-      });
-    }
-    return { position_type: parsed.position_type, legs };
   }
 
   private addContext(position: AnalysisPosition): void {
@@ -664,50 +957,6 @@ export class AnalysisChat {
     this.contextStack.push(position);
     if (this.contextStack.length > 3) {
       this.contextStack.shift();
-    }
-  }
-
-  private positionSummary(parsed: ParseResponse): PositionSummary {
-    if (parsed.reference) {
-      return {
-        header: this.referenceLabel(parsed.reference),
-        legs: parsed.legs,
-        provisional: true,
-      };
-    }
-    return {
-      header: parsed.header ?? this.fallbackHeader(parsed),
-      legs: parsed.legs,
-      provisional: false,
-    };
-  }
-
-  private fallbackHeader(parsed: ParseResponse): string {
-    if (parsed.strategy_key) {
-      return parsed.strategy_key
-        .split('_')
-        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-        .join(' ');
-    }
-    return parsed.position_type === 'single' ? 'Single option' : 'Two-leg position';
-  }
-
-  private referenceLabel(reference: ReferenceEdit): string {
-    const count = reference.strikes ?? 0;
-    const strikes = `${count} strike${count === 1 ? '' : 's'}`;
-    switch (reference.kind) {
-      case 'same':
-        return 'Same position as the previous request';
-      case 'shift':
-        return `Same position, shifted ${strikes} ${reference.direction ?? 'up'}`;
-      case 'widen':
-        return `Same position, widened by ${strikes}`;
-      case 'narrow':
-        return `Same position, narrowed by ${strikes}`;
-      case 'expiration':
-        return `Same position, expiring ${reference.expiration ?? 'later'}`;
-      default:
-        return 'Same position as the previous request';
     }
   }
 
@@ -770,21 +1019,9 @@ export class AnalysisChat {
         }
         return {
           ...message,
-          activities: message.activities.map((activity) =>
-            activity.state === 'running'
-              ? { ...activity, state: 'failed', detail: 'Cancelled' }
-              : activity,
-          ),
+          activities: message.activities.filter((activity) => activity.state !== 'running'),
         };
       }),
     );
-  }
-
-  private resetActivities(turnId: number): void {
-    this.updateTurn(turnId, (message) => ({
-      ...message,
-      activities: [],
-      news: undefined,
-    }));
   }
 }

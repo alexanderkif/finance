@@ -2,11 +2,17 @@
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { App } from './app';
-import { AnalysisResult, ChartResponse, MarketResponse } from './models/market-data';
+import {
+  AnalysisResult,
+  ChartResponse,
+  ChatTurnRequest,
+  ChatTurnResponse,
+  MarketResponse,
+} from './models/market-data';
 import { MarketApi } from './services/market-data';
 
 const chartStub: ChartResponse = {
-  symbol: 'SPY',
+  symbol: 'AAPL',
   range: '6mo',
   interval: '1d',
   candles: [],
@@ -21,14 +27,14 @@ const chartStub: ChartResponse = {
 };
 
 const marketStub: MarketResponse = {
-  symbol: 'SPY',
+  symbol: 'AAPL',
   price: 772.31,
   change_pct: 0.34,
   vix: 17.11,
   news: [
     {
-      title: 'SPY edges higher as breadth improves',
-      url: 'https://example.com/spy-news',
+      title: 'AAPL edges higher as breadth improves',
+      url: 'https://example.com/aapl-news',
       publisher: 'Newswire',
       published_at: '2026-10-28T16:00:00Z',
     },
@@ -45,7 +51,7 @@ const marketStub: MarketResponse = {
 const analysisStub: AnalysisResult = {
   strategy_key: 'bull_put_spread',
   intent: 'open',
-  header: 'Bull Put Spread XSP 732/729 2030-11-15',
+  header: 'Bull Put Spread AAPL 732/729 2030-11-15',
   recommendation: 'This spread profits if the underlying stays above 731.79.',
   probability_positive: 0.7,
   max_profit: 150,
@@ -81,27 +87,73 @@ const analysisStub: AnalysisResult = {
 
 describe('App', () => {
   const marketApiStub = {
-    parse: async () => ({
-      position_type: 'single' as const,
-      legs: [
-        {
-          symbol: 'SPY',
-          side: 'buy' as const,
-          option_type: 'call' as const,
-          strike: 600,
-          expiration: '2030-11-15',
+    chatTurn: async (request: ChatTurnRequest): Promise<ChatTurnResponse> => ({
+      mode: 'confirm',
+      text: `AAPL is near 770.00. I can use Bull Put Spread ${request.symbol} 760/755 2030-11-15.`,
+      language: 'English',
+      intent: 'open',
+      draft: {
+        position_type: 'strategy',
+        legs: [
+          {
+            symbol: request.symbol,
+            side: 'sell',
+            option_type: 'put',
+            strike: 760,
+            expiration: '2030-11-15',
+          },
+          {
+            symbol: request.symbol,
+            side: 'buy',
+            option_type: 'put',
+            strike: 755,
+            expiration: '2030-11-15',
+          },
+        ],
+        strategy_key: 'bull_put_spread',
+        reference: null,
+      },
+      missing: [],
+      suggestions: {
+        fields: ['expiration', 'long_strike', 'strike'],
+        expiration: '2030-11-15',
+        strike: 760,
+        long_strike: 755,
+        width: 2,
+      },
+      confirm: {
+        summary: `Bull Put Spread ${request.symbol} 760/755 2030-11-15`,
+        position: {
+          position_type: 'strategy',
+          legs: [
+            {
+              symbol: request.symbol,
+              side: 'sell',
+              option_type: 'put',
+              strike: 760,
+              expiration: '2030-11-15',
+            },
+            {
+              symbol: request.symbol,
+              side: 'buy',
+              option_type: 'put',
+              strike: 755,
+              expiration: '2030-11-15',
+            },
+          ],
         },
-      ],
-      missing_fields: [],
-      detected_language: 'English',
+      },
+      switch: null,
+      pending_draft: null,
+      as_of: '2030-10-06T15:48:15Z',
+      degraded: false,
+      warnings: [],
     }),
     streamAnalysis: async (): Promise<AnalysisResult> => analysisStub,
     getExample: async (symbol: string) => ({
       symbol,
-      message:
-        'Sell the 760 put and buy the 755 put on SPY expiring 2030-11-15 for a defined-risk bull put spread.',
-      description:
-        'SPY is near 770.00. This 760/755 put spread expires in 40 days and caps the loss at the strike width minus the credit received.',
+      message: `Sell the 760 put and buy the 755 put on ${symbol} expiring 2030-11-15 for a defined-risk bull put spread.`,
+      description: `${symbol} is near 770.00. This 760/755 put spread expires in 40 days and caps the loss at the strike width minus the credit received.`,
       legs: [
         {
           symbol,
@@ -144,26 +196,48 @@ describe('App', () => {
     const fixture = TestBed.createComponent(App);
     fixture.detectChanges();
     const httpTesting = TestBed.inject(HttpTestingController);
-    httpTesting.expectOne('/api/chart/SPY?range=6mo&interval=1d').flush(chartStub);
-    httpTesting.expectOne('/api/market/SPY').flush(marketStub);
+    httpTesting.expectOne('/api/chart/AAPL?range=6mo&interval=1d').flush(chartStub);
+    httpTesting.expectOne('/api/market/AAPL').flush(marketStub);
     await fixture.whenStable();
     fixture.detectChanges();
     return { fixture, compiled: fixture.nativeElement as HTMLElement };
   }
 
-  it('renders the default SPY dashboard with price and news', async () => {
+  it('renders the default AAPL dashboard with price and news', async () => {
     const { compiled } = await renderDashboard();
 
-    expect(compiled.querySelector('#ticker')).toHaveProperty('value', 'SPY');
+    expect(compiled.querySelector('#ticker')).toHaveProperty('value', 'AAPL');
     expect(compiled.querySelector('.price')?.textContent).toContain('772.31');
     expect(compiled.querySelector('.change')?.textContent).toContain('0.34');
     expect(compiled.querySelector('.vix-value')?.classList).toContain('vix-calm');
     expect(compiled.querySelector('.levels')?.textContent).toContain('742');
     expect(compiled.querySelector('.levels')?.textContent).toContain('782');
     expect(compiled.querySelector('.news-list a')?.getAttribute('href')).toBe(
-      'https://example.com/spy-news',
+      'https://example.com/aapl-news',
     );
     expect(compiled.querySelector('app-analysis-chat')).not.toBeNull();
+  });
+
+  it('renders the popular instruments in alphabetical order', async () => {
+    const { compiled } = await renderDashboard();
+    const labels = Array.from(
+      compiled.querySelectorAll<HTMLButtonElement>('.instrument-card .chip'),
+    ).map((item) => item.textContent?.trim());
+
+    expect(labels).toEqual([
+      'AAPL',
+      'AMZN',
+      'DIA',
+      'GOOGL',
+      'IWM',
+      'META',
+      'MSFT',
+      'NVDA',
+      'QQQ',
+      'SPY',
+      'TSLA',
+      'XSP',
+    ]);
   });
 
   it('shows placeholders instead of stale values while data loads', () => {
@@ -176,8 +250,8 @@ describe('App', () => {
     expect(compiled.querySelector('.change')?.textContent).toContain('Loading price');
 
     const httpTesting = TestBed.inject(HttpTestingController);
-    httpTesting.expectOne('/api/chart/SPY?range=6mo&interval=1d').flush(chartStub);
-    httpTesting.expectOne('/api/market/SPY').flush(marketStub);
+    httpTesting.expectOne('/api/chart/AAPL?range=6mo&interval=1d').flush(chartStub);
+    httpTesting.expectOne('/api/market/AAPL').flush(marketStub);
   });
 
   it('switches the selected instrument from a chip', async () => {
@@ -235,7 +309,10 @@ describe('App', () => {
     expect(userMessage.textContent).toContain('2030-11-15');
     expect(userMessage.textContent).not.toContain('732');
     expect(compiled.querySelector<HTMLTextAreaElement>('.chat-form textarea')?.value).toBe('');
-    expect(compiled.querySelector('.analysis-card')).not.toBeNull();
+    expect(compiled.querySelector('.draft-card')?.textContent).toContain(
+      'Bull Put Spread AAPL 760/755 2030-11-15',
+    );
+    expect(compiled.querySelector('.analysis-card')).toBeNull();
     expect(compiled.querySelector('.chat-log')?.textContent).not.toContain('caps the loss');
   });
 });

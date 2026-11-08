@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   DEFAULT_CHAT_HEIGHT_PX,
+  DEFAULT_SYMBOL,
   MAX_CHAT_HEIGHT_PX,
   MIN_CHAT_HEIGHT_PX,
   Preferences,
@@ -9,6 +10,12 @@ import {
 describe('Preferences chart toggles', () => {
   beforeEach(() => {
     localStorage.clear();
+  });
+
+  it('defaults the instrument to AAPL', () => {
+    const preferences = new Preferences();
+    expect(DEFAULT_SYMBOL).toBe('AAPL');
+    expect(preferences.symbol()).toBe('AAPL');
   });
 
   it('defaults the chart range to 6mo', () => {

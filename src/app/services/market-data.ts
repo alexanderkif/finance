@@ -6,6 +6,8 @@ import {
   AnalysisRequest,
   AnalysisResult,
   AnalysisStreamEvent,
+  ChatTurnRequest,
+  ChatTurnResponse,
   ExampleResponse,
   ParseResponse,
 } from '../models/market-data';
@@ -27,6 +29,10 @@ export class MarketApi {
       this.http.get<ExampleResponse>(`/api/analysis/example/${encodeURIComponent(symbol)}`),
       signal,
     );
+  }
+
+  chatTurn(request: ChatTurnRequest, signal?: AbortSignal): Promise<ChatTurnResponse> {
+    return this.send(this.http.post<ChatTurnResponse>('/api/chat/turn', request), signal);
   }
 
   parse(

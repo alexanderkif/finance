@@ -19,6 +19,7 @@ const RANGE_KEY = 'osa.range';
 const CHAT_HEIGHT_KEY = 'osa.chat.height';
 const SYMBOL_PATTERN = /^[A-Z0-9._-]{1,15}$/;
 const CHART_RANGES: readonly ChartRange[] = ['1mo', '3mo', '6mo', '1y', '5y'];
+export const DEFAULT_SYMBOL = 'AAPL';
 export const DEFAULT_CHAT_HEIGHT_PX = 640;
 export const MIN_CHAT_HEIGHT_PX = 240;
 export const MAX_CHAT_HEIGHT_PX = 960;
@@ -32,7 +33,7 @@ const DEFAULT_CHART_TOGGLES: ChartToggles = {
 @Service()
 export class Preferences {
   readonly theme = signal<Theme>('light');
-  readonly symbol = signal('SPY');
+  readonly symbol = signal(DEFAULT_SYMBOL);
   readonly range = signal<ChartRange>('6mo');
   readonly chartToggles = signal<ChartToggles>({
     ...DEFAULT_CHART_TOGGLES,
