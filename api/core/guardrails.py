@@ -48,6 +48,13 @@ _ABUSIVE: Final = re.compile(
     r"fuck\w*|shit\w*|bitch\w*|asshole\w*)\b",
     re.IGNORECASE,
 )
+_HACKING: Final = re.compile(
+    r"\b(?:hack(?:ing|er|ers)?|exploit|malware|ransomware|phishing|"
+    r"ddos|keylogger|reverse\s+shell|sql\s+injection|xss|csrf|"
+    r"credential(?:s)?|password(?:s)?|passwd|ssh\s+key|private\s+key|"
+    r"bypass\s+(?:security|auth)|crack(?:ing)?)\b",
+    re.IGNORECASE,
+)
 _UNSUPPORTED_STRATEGY: Final = re.compile(
     r"\b(?:iron\s+condor|condor|iron\s+butterfly|butterfly|"
     r"straddle|strangle|calendar\s+spread|diagonal\s+spread|"
@@ -83,6 +90,10 @@ _INJECTION = (
     "change or reveal system behavior."
 )
 _ABUSIVE_MESSAGE = "I can only help with a single option or a two-leg vertical spread."
+_HACKING_MESSAGE = (
+    "I can only help with the selected instrument's market context, news, and "
+    "option positions. I cannot help with hacking, credentials, or personal use."
+)
 _INVALID_SYMBOL = "The symbol contains invalid characters or is too long."
 
 
@@ -105,6 +116,8 @@ def check_chat_request(
         raise GuardrailViolation(_INVALID_SYMBOL)
     if _PROMPT_INJECTION.search(normalized):
         raise GuardrailViolation(_INJECTION)
+    if _HACKING.search(normalized):
+        raise GuardrailViolation(_HACKING_MESSAGE)
     if _ABUSIVE.search(normalized):
         raise GuardrailViolation(_ABUSIVE_MESSAGE)
     if _OFF_TOPIC.search(normalized):
@@ -129,3 +142,36 @@ def check_chat_request(
         and not has_context
     ):
         raise GuardrailViolation(_OUT_OF_SCOPE)
+
+
+def check_chat_turn_request(message: str, symbol: str) -> None:
+    """Scope check for the conversational endpoint.
+
+    Greetings and market questions about the selected instrument are allowed;
+    the option-vocabulary and teaching-question guards apply only to the
+    structured parse endpoint. Hacking, credential probing, personal use,
+    prompt injection, abuse, unsupported strategies, and unsafe input are still
+    refused deterministically.
+    """
+    normalized = message.strip()
+    if len(normalized) > MAX_MESSAGE_LENGTH:
+        raise GuardrailViolation(_TOO_LONG)
+    if not _SYMBOL_PATTERN.fullmatch(symbol.strip().upper().removeprefix("_")):
+        raise GuardrailViolation(_INVALID_SYMBOL)
+    if _PROMPT_INJECTION.search(normalized):
+        raise GuardrailViolation(_INJECTION)
+    if _HACKING.search(normalized):
+        raise GuardrailViolation(_HACKING_MESSAGE)
+    if _ABUSIVE.search(normalized):
+        raise GuardrailViolation(_ABUSIVE_MESSAGE)
+    if _OFF_TOPIC.search(normalized):
+        raise GuardrailViolation(_OUT_OF_SCOPE)
+    if _UNSUPPORTED_STRATEGY.search(normalized):
+        raise GuardrailViolation(_UNSUPPORTED_STRATEGY_MESSAGE)
+    if (
+        len(_SIDE_ACTIONS.findall(normalized)) > MAX_LEGS
+        or len(_LEG_MENTIONS.findall(normalized)) > MAX_LEGS
+    ):
+        raise GuardrailViolation(_TOO_MANY_LEGS)
+    if _UNSAFE_CHARACTERS.search(normalized) or _LONG_TOKEN.search(normalized):
+        raise GuardrailViolation(_INVALID_SYMBOL)

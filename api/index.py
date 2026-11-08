@@ -6,6 +6,7 @@ import httpx
 from fastapi import FastAPI
 from routers.analysis import router as analysis_router
 from routers.chart import router as chart_router
+from routers.chat import router as chat_router
 from routers.market import router as market_router
 from routers.options import router as options_router
 
@@ -34,4 +35,5 @@ app: Final = FastAPI(
 app.include_router(options_router)
 app.include_router(market_router)
 app.include_router(chart_router)
+app.include_router(chat_router)
 app.include_router(analysis_router)

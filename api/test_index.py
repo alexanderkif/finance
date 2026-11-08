@@ -33,8 +33,10 @@ class ApiDocumentationTests(unittest.IsolatedAsyncioTestCase):
             "/api/market/{symbol}",
             "/api/chart/{symbol}",
             "/api/options/chain/{symbol}",
+            "/api/chat/turn",
             "/api/analysis/parse",
             "/api/analysis/run",
+            "/api/analysis/run/stream",
         ):
             self.assertIn(path, paths)
 
