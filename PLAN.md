@@ -61,9 +61,10 @@ with independent degradation per section; no synthetic data.
 
 - Rewrite the Angular frontend; do not preserve the legacy layout or the Yahoo
   Finance data services.
-- Add the top dashboard grid: instrument selector defaulting to SPY and
-  persisted in `localStorage`, current price and change, support/resistance,
-  brief market context, and one to three news headline links.
+- Add the top dashboard grid: instrument selector defaulting to SPY at the time
+  (superseded by Phase 11: AAPL) and persisted in `localStorage`, current price
+  and change, support/resistance, brief market context, and one to three news
+  headline links.
 - Render the candlestick chart with `ng-apexcharts`, a volume histogram, and
   API-provided SMA/RSI indicators, plus user-added trend lines.
 - Add light and dark themes, persisted client-side, defaulting to the OS
@@ -157,7 +158,8 @@ Decisions for this phase:
   the nearest available strikes.
 - Keep all financial arithmetic in `api/core/metrics.py`. The model never
   supplies probabilities, sigma, breakeven, P/L, theta, or volatility values.
-- Intent continues to come from the Intent selector, not from the message.
+- Intent continues to come from the Intent selector at the time (superseded by
+  Phase 11: the chat infers intent from the message, open by default).
 - Test multilingual reference phrasing, ambiguous or missing context, shifts
   beyond the listed ladder, width changes, and expiry changes.
 - **GATE 8:** a follow-up such as "the same spread, two strikes higher"
@@ -190,10 +192,61 @@ Decisions for this phase:
 ## Phase 10 — Example intent cleanup (GATE 10)
 
 - Remove the opening intent from the generated `Use example` message; intent
-  must come only from the Intent selector.
+  must come only from the Intent selector at the time (superseded by Phase 11:
+  there is no intent selector).
 - Update [API_SPEC.md](API_SPEC.md) and the example, chat, and endpoint tests.
 - **GATE 10:** `Use example` submits an intent-free message, and the selected
   Intent value appears on the resulting analysis card.
+
+## Phase 11 — Conversational chat and guided option draft (GATE 11)
+
+Decisions for this phase:
+
+- The chat is a scoped financial conversation about the selected instrument and
+  its environment, with an option-drafting mode. It is not a general-purpose
+  chatbot.
+- Default symbol: AAPL. Popular-symbol chips are alphabetical: AAPL, AMZN, DIA,
+  GOOGL, IWM, META, MSFT, NVDA, QQQ, SPY, TSLA, XSP.
+- UI language is English; answers use the language of the user's message.
+- Explicit switch commands switch immediately; exploratory questions confirm
+  first. An option request for another symbol proposes a switch and carries a
+  pending draft.
+- Draft suggestions use the nearest 21-60 day expiration, a near-money strike,
+  and a default width of two listed strike steps.
+- One Gemini call per chat turn; a confirmed analysis adds exactly one
+  synthesis call. A plain "yes" in confirm mode and a plain cancel are handled
+  on the client without a chat turn, so an option request plus confirmation
+  stays at two Gemini calls.
+- The dashboard market snapshot is client-provided conversational context and
+  never supplies an analysis metric.
+
+Tasks:
+
+- Add `POST /api/chat/turn` with `answer`, `draft`, `confirm`,
+  `switch_symbol`, and `refused` modes.
+- Add `agent/chat.py`, `core/market_digest.py`, and `core/patterns.py`.
+- Reuse extraction, strategy classification, reference edits, and the listed
+  strike ladder for draft suggestions.
+- Extend `api/core/guardrails.py` to allow greetings and market questions while
+  still refusing off-topic, hacking, credential-probing, personal-use,
+  prompt-injection, abusive, oversized, and unsupported-strategy input.
+- Replace the frontend parse-first flow with the chat state machine, draft card,
+  confirmation, switch handling, and post-card return to conversation.
+- Default the instrument to AAPL and render the alphabetical chips.
+- Add backend and frontend tests for all modes, grounding, red-team refusals,
+  switch behavior, draft edits, and the one-call invariant.
+- Update [API_SPEC.md](API_SPEC.md), [ARCHITECTURE.md](ARCHITECTURE.md),
+  [PLAYBOOK_SPEC.md](PLAYBOOK_SPEC.md), [DATA_CONTRACT.md](DATA_CONTRACT.md),
+  and [src/AGENTS.md](src/AGENTS.md).
+
+**GATE 11:** a browser pass on `vercel dev` shows a greeting, a grounded trend
+answer, a `long call` draft with a suggested strike and expiration, a plain
+"yes" that renders the card, a "wider by two steps" edit, a cancelled draft, an
+explicit switch that changes the chart, a confirmed switch from an exploratory
+question, and a return to the chat after the card. Tests prove a chat turn makes
+at most one Gemini call, a deterministic refusal makes zero, a confirmed
+analysis adds exactly one synthesis call, refused requests expose no secrets,
+and the snapshot never supplies an analysis metric.
 
 ## Phase completion
 

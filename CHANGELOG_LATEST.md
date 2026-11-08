@@ -1,5 +1,99 @@
 # Phase log
 
+## Chat localization — 2026-11-08
+
+- All deterministic chat text now follows the question language:
+  confirm/draft/missing-field prompts, cancellation, refusals, instrument
+  switching, chain-unavailable messages, and reference errors. The English and
+  Russian catalogs live in `core/chat_i18n.py`.
+- The Angular chat localizes bubbles, role labels, draft and switch card helper
+  text, the news caption, activity stage labels, retry messages, warnings, and
+  common visible errors. `chat-copy.ts` holds the English/Russian copy;
+  `api-error.ts` accepts a language.
+- The initial greeting switches to the detected language. The site chrome stays
+  English.
+- Deterministic helper templates are localized for English and Russian; other
+  languages receive the model answer in the question language with English
+  helper templates.
+- Tests: backend 139 pass; frontend 68 pass; production build succeeds.
+- Live API check: a UTF-8 Russian "хочу купить колл" request returned
+  `mode: "confirm"`, `language: "Russian"`, and Russian confirm text.
+
+## Chat UX refinements — 2026-11-08
+
+- Removed the chat-turn "Interpreting your request" activity. Cancelling or
+  replacing a request now removes its in-progress stages instead of rendering
+  them as failed, so the chat no longer shows a scary "failed / Cancelled" step.
+  A subtle "Thinking…" status next to Cancel replaces it while a turn is
+  in flight.
+- Removed the redundant "Card added. Ask about the chart, or adjust the
+  position." assistant message. The inline analysis card is the answer.
+- Removed the Intent selector. The chat infers `open`, `close`, or `roll` from
+  the message, defaults to `open`, stores it on the draft, and passes it to the
+  analysis request.
+- Live API check on 2026-11-08: "I want to close my long call" returned
+  `intent: "close"` on both the draft and the confirm.
+- Tests: backend 134 pass; frontend 67 pass; production build succeeds.
+
+## Phase 11 implementation — 2026-11-08
+
+- Added `POST /api/chat/turn` with `answer`, `draft`, `confirm`,
+  `switch_symbol`, and `refused` modes. The chat holds a scoped financial
+  conversation about the selected instrument, drafts a supported option, or
+  proposes an instrument switch.
+- Added `agent/chat.py` for the single structured Gemini call, and
+  `core/chat_models.py`, `core/market_digest.py`, `core/patterns.py`,
+  `core/draft_suggestions.py`, `core/option_parsing.py`, and
+  `routers/chat.py` for schemas, deterministic grounding, candlestick patterns,
+  live-chain suggestions, shared parsing, and routing.
+- Draft suggestions use the listed expiration closest to 40 days, a near-money
+  strike, and a default spread width of two listed strike steps. The server
+  validates every proposed leg against the listed chain and never invents a
+  contract.
+- Plain "yes", plain cancel, "use these values", explicit switch commands, and
+  switch-continuation turns are handled deterministically. A normal chat turn
+  makes at most one Gemini call; a confirmed analysis adds exactly one
+  synthesis call.
+- Added hacking, credential-probing, personal-use, and coding refusals to the
+  deterministic guardrails while allowing greetings and market questions.
+- The Angular chat now sends the loaded market and chart snapshot to
+  `/api/chat/turn`, renders an editable draft card with Analyze / Wider by 2 /
+  Use these / Change / Start over, shows a switch confirmation card, and
+  returns to the conversation after every analysis card.
+- Changed the default instrument to AAPL and the popular-symbol chips to
+  alphabetical order: AAPL, AMZN, DIA, GOOGL, IWM, META, MSFT, NVDA, QQQ, SPY,
+  TSLA, XSP. The snapshot is trimmed to the last 120 candles and indicator
+  points before sending.
+- Tests: backend 134 pass; frontend 67 pass; production build succeeds.
+- Live API verification on 2026-11-08 through `uvicorn index:app`: explicit
+  MSFT switching, grounded English and Russian trend answers, a live
+  `Long Call AAPL 245 2026-12-18` draft, and `intent: "close"` for a close
+  request all worked.
+- GATE 11 passed on 2026-11-08: a fresh `vercel dev` on :3000 served
+  `/api/chat/turn` and the updated `ChatTurnResponse.intent`; headless Chrome
+  rendered "Market chat" and "Instrument: AAPL" with no Intent selector; the
+  dev logs showed `/api/chat/turn` and `/api/analysis/run/stream` 200 with live
+  Gemini, CBOE, Twelve Data, and Finnhub calls.
+
+## Phase 11 contract (Phase A) — 2026-11-08
+
+- Documented the scoped conversational market chat and guided option draft:
+  `answer`, `draft`, `confirm`, `switch_symbol`, and `refused` modes; a plain
+  "yes" accepts proposed fields; edits such as "wider by two steps" update the
+  draft; the chat returns to conversation after every card.
+- Documented the instrument switch rules: explicit commands switch immediately,
+  exploratory questions confirm first, and an option request for another
+  symbol carries a pending draft across the switch.
+- Set the default instrument to AAPL and the alphabetical popular-symbol chips:
+  AAPL, AMZN, DIA, GOOGL, IWM, META, MSFT, NVDA, QQQ, SPY, TSLA, XSP.
+- Documented the default draft expiration (21-60 days), near-money strike
+  rules, and a spread width of two listed strike steps.
+- Documented deterministic handling for a plain "yes" and a plain cancel, so an
+  option request plus confirmation stays at two Gemini calls.
+- Documented the client market snapshot as non-authoritative conversation
+  context that never supplies an analysis metric.
+- No runtime code changed. GATE 11 remains open.
+
 ## Chart right edge and chat sizing — 2026-11-06
 
 - The candlestick x-axis now keeps one candle interval past the newest candle.

@@ -6,12 +6,12 @@ The application currently runs on free provider tiers for non-commercial
 development. Free tiers are not commercial entitlements: obtain licensed plans
 or written approval before any commercial launch.
 
-| Data | Provider | Key | Notes |
-| --- | --- | --- | --- |
-| Options chain, underlying quote, VIX | CBOE delayed | none | Delayed 15 minutes |
-| XSP/VIX daily candles | CBOE index history | none | EOD, OHLC, no volume |
-| Other daily candles | Twelve Data Basic | `TWELVE_DATA_API_KEY` | 8 requests/min, 800/day |
-| News headlines | Finnhub free | `FINNHUB_API_KEY` | Company news, general-news fallback |
+| Data                                 | Provider           | Key                   | Notes                               |
+| ------------------------------------ | ------------------ | --------------------- | ----------------------------------- |
+| Options chain, underlying quote, VIX | CBOE delayed       | none                  | Delayed 15 minutes                  |
+| XSP/VIX daily candles                | CBOE index history | none                  | EOD, OHLC, no volume                |
+| Other daily candles                  | Twelve Data Basic  | `TWELVE_DATA_API_KEY` | 8 requests/min, 800/day             |
+| News headlines                       | Finnhub free       | `FINNHUB_API_KEY`     | Company news, general-news fallback |
 
 - Read provider keys only in the server process. Use `.env.local` for local
   development and deployment environment settings in production.
@@ -111,6 +111,23 @@ unavailable, report `vix: null` with a warning.
 - News may mention dividends, earnings, or splits, but it is not a live event
   calendar. Structured calendars require separate verified endpoints and must
   not be inferred from headlines.
+
+## Chat market snapshot
+
+- The chat may receive the dashboard's already-loaded market and chart values
+  as a client-provided snapshot. Validate and size-limit it; treat it as
+  untrusted conversational context.
+- The snapshot is not a market-data provider and must never feed the
+  deterministic analysis metrics. A confirmed analysis always re-fetches the
+  chain, quote, candles, and news from the providers.
+- Supported snapshot fields are price, change percent, VIX, up to three support
+  and three resistance levels, recent candles, SMA 20/50 points, RSI 14 points,
+  up to five headlines, per-section timestamps, sources, chart range and chart
+  source, and degradation warnings.
+- If the snapshot is missing, empty, or degraded, the chat says the value is
+  unavailable. It never synthesizes candles, levels, or headlines.
+- Do not present snapshot data as real-time; the delayed-data badge and
+  timestamps still apply.
 
 ## Analysis volatility context
 

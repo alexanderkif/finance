@@ -37,12 +37,13 @@ Unavailable values are explicit; see [DATA_CONTRACT.md](DATA_CONTRACT.md).
   a Cancel button. It reads `/api/analysis/run/stream` incrementally and treats
   `error` events as the HTTP-equivalent failure. Sending a new message aborts
   the stream and ignores stale events.
-- After a non-validation failure, the chat offers "Retry failed step". A parse
-  failure retries parsing and then analysis; an analysis failure retries only
-  the analysis step with the already parsed position, without re-sending the
-  message or calling Gemini extraction again.
-- Missing parse fields keep the chat at the parse step and ask only for the
-  missing details; `/api/analysis/run` is not called.
+- The chat retries a failed `/api/chat/turn` request without duplicating the
+  user turn. A confirmed analysis retries only the analysis stream with the
+  already confirmed position; it does not repeat extraction or the chat turn.
+- A `draft` or `confirm` response keeps the draft on the client. Missing fields
+  are collected across turns; `/api/analysis/run` is called only after the
+  user confirms a complete position. A failed chat turn never discards the
+  draft.
 - The chat scrolls to the newest message while the user is at the bottom. It
   stops auto-scrolling after the user scrolls up and resumes when they return
   to the bottom.
@@ -125,14 +126,212 @@ degraded, reason|null, warnings[]
 - Degraded chain responses keep the real cached `as_of` timestamp and never
   fabricate contracts or values.
 
+## `POST /api/chat/turn`
+
+The primary chat endpoint. It holds a scoped financial conversation about the
+selected instrument, drafts an option position, or proposes an instrument
+switch. It is not a general-purpose chat endpoint. The frontend sends every
+message here; the server decides whether the turn is a market answer, an option
+draft, a switch, or a refusal.
+
+Request fields:
+
+```text
+symbol: string
+message: string (required unless continuation is true)
+intent: "open" | "close" | "roll" (default hint; the chat infers from the message)
+language: string (default "English"; the last detected answer language)
+history: { role: "user" | "assistant", text: string }[] (max 8 turns)
+draft: ChatDraft | null
+context: AnalysisPosition[] (max 3 complete previous positions)
+continuation: boolean (default false; used after a switch)
+market: ChatMarketSnapshot
+```
+
+`ChatDraft`:
+
+```text
+position_type: "single" | "strategy"
+legs: {
+  symbol: string,
+  side: "buy" | "sell" | null,
+  option_type: "call" | "put" | null,
+  strike: number | null,
+  expiration: "YYYY-MM-DD" | null
+}[]
+strategy_key: string | null
+reference: { kind, strikes, direction, expiration } | null
+intent: "open" | "close" | "roll" | null
+```
+
+`ChatMarketSnapshot` is the dashboard data the user already sees. It is
+client-provided conversational context, not a provider response:
+
+```text
+symbol, price, change_pct, vix,
+support[], resistance[],
+candles: { t, o, h, l, c, v | null }[],
+sma: { period, points: { t, value }[] }[],
+rsi: { period, points: { t, value }[] },
+news: { title, url, publisher, published_at }[],
+range, chart_source, chart_as_of,
+as_of, quote_as_of, vix_as_of, news_as_of,
+sources: { quote, vix, news },
+degraded, warnings[]
+```
+
+Size limits: `message` 2,000 characters; each history text 2,000 characters;
+at most 120 candles, 120 SMA points, and 120 RSI points; at most five
+headlines; at most three support and three resistance levels; at most two
+draft legs and three context positions.
+
+Response fields:
+
+```text
+mode: "answer" | "draft" | "confirm" | "switch_symbol" | "refused"
+text: string
+language: string
+intent: "open" | "close" | "roll"
+draft: ChatDraft | null
+missing: string[]
+suggestions: ChatDraftSuggestions | null
+confirm: { summary: string, position: AnalysisPosition } | null
+switch: { symbol: string, explicit: boolean, reason: string } | null
+pending_draft: ChatDraft | null
+as_of: string | null
+degraded: boolean
+warnings: string[]
+```
+
+`ChatDraftSuggestions` names the fields the server proposed from the live
+chain:
+
+```text
+fields: string[]
+expiration: string | null
+strike: number | null
+long_strike: number | null
+width: number | null
+```
+
+For a single option, `strike` is the proposed strike. For a spread, `strike` is
+the short leg and `long_strike` is the long leg.
+
+### Modes
+
+- `answer`: a grounded answer about the selected instrument using only the
+  supplied snapshot and a deterministic market digest. It is used for
+  greetings, trend and pattern questions, key levels, volatility context, and
+  headlines. It contains no analysis card and no metric fields.
+- `draft`: the option draft still has missing fields. `draft` carries the known
+  values, and `suggestions` may propose some of the missing ones. The frontend
+  renders an editable draft card.
+- `confirm`: every leg field has a concrete value after applying suggestions.
+  `confirm.position` is ready for `/api/analysis/run`. `suggestions` identifies
+  which values were proposed, so the UI can label them as example values. A
+  plain "yes" accepts and runs the analysis.
+- `switch_symbol`: the user asked about another instrument. `switch.explicit`
+  is `true` for an imperative command and `false` for an exploratory question.
+  An option request for another symbol returns `explicit: false` and carries
+  `pending_draft`.
+- `refused`: the request is outside the allowed scope. It returns a short
+  refusal, no analysis fields, and no draft.
+
+### Language
+
+The chat returns `language` and uses it for deterministic text. English and
+Russian catalogs cover helper prompts, refusals, visible errors, and the chat
+copy; other languages receive the model answer in the question language with
+English helper templates. The UI chrome remains English. The Angular client
+localizes the analysis activity timeline and common visible errors for English
+and Russian; the API stage labels stay stable English for other clients.
+
+### Intent inference
+
+The chat infers the intent from the message: `open` when the user describes a
+position to establish (including buy or sell), `close` when they say close,
+exit, or take profit, and `roll` when they say roll or roll out. The default is
+`open`. The inferred value is stored on `ChatDraft.intent`, returned as
+`ChatTurnResponse.intent`, and sent unchanged to `/api/analysis/run`. There is
+no intent selector in the UI.
+
+### Instrument switching
+
+- Explicit commands such as "show MSFT chart", "switch to MSFT", "покажи график
+  MSFT", and "переключи на MSFT" return `explicit: true`. The frontend switches
+  the selected symbol immediately, reloads the dashboard, and appends a local
+  switch notice.
+- Exploratory questions such as "what about MSFT?", "XSP?", and "а что там у
+  MSFT?" return `explicit: false`. The frontend asks for confirmation first.
+- An option request for a different symbol returns `explicit: false` with the
+  extracted `pending_draft`. After the user confirms the switch, the frontend
+  selects the new symbol, waits for the dashboard snapshot, and sends a
+  continuation turn with `continuation: true` and the pending draft.
+- The server validates the symbol format and never silently substitutes one
+  instrument for another. SPY, XSP, and SPX are different underlyings.
+
+### Draft suggestions
+
+Suggestions are deterministic and come from the live chain; see
+[PLAYBOOK_SPEC.md](PLAYBOOK_SPEC.md) for the strategy-specific strike rules.
+
+- Expiration: the listed expiration closest to 40 days, preferring 21-60 days.
+- Width: two listed strike steps, meaning the long leg is the second next
+  listed strike from the short leg. If the ladder has fewer steps, use the
+  widest available and say so.
+- Every suggestion is labelled as an example structure, not a recommendation.
+- When the request leaves the side or option type ambiguous, the server may
+  propose the common case and label it as assumed. The user can change it.
+- If no listed candidate exists, return the nearest listed strikes or a
+  `draft` response with an explicit warning instead of inventing a contract.
+
+### Deterministic confirmation and cancellation
+
+- A short confirmation ("yes", "y", "ok", "sure", "use these", "да", "ок") in
+  `confirm` mode is handled by the client without a chat turn. The client sends
+  the confirmed `confirm.position` directly to
+  `/api/analysis/run/stream`.
+- A short cancel ("cancel", "start over", "never mind", "отмена", "начать
+  заново") with an active draft clears the draft locally and returns to
+  `explore` without a chat turn.
+- "Use these values" completes the active draft from the live chain
+  deterministically, without a chat model call.
+- A continuation turn after a switch completes the pending draft from the new
+  symbol's live chain deterministically, without a chat model call.
+- Any other message, including a conditional confirmation or an edit, goes to
+  `/api/chat/turn`.
+- This keeps the happy path "option request -> yes -> card" at one chat call
+  plus one synthesis call, and the switch-continuation path at one synthesis
+  call.
+
+### Grounding and cost
+
+- The server builds a deterministic `MarketDigest` from the snapshot. The model
+  may describe trend, candlestick patterns, levels, volatility context,
+  market sentiment derived from the supplied volatility/trend/headline context,
+  and headlines. It must not calculate new financial values, invent data, or
+  present sentiment as a forecast.
+- The snapshot is never used for deterministic analysis metrics. A confirmed
+  analysis re-fetches the chain, quote, candles, and news from the providers.
+- Each chat turn makes at most one Gemini call. A deterministic refusal makes
+  zero. A confirmed analysis adds exactly one synthesis call in
+  `/api/analysis/run` or `/api/analysis/run/stream`. A single option request
+  followed by a plain confirmation therefore makes at most two Gemini calls in
+  total: one chat call and one synthesis call. A further edit is a new turn and
+  may add one chat call for that edit.
+
 ## `POST /api/analysis/parse`
+
+Structured extraction endpoint. The chat frontend uses `/api/chat/turn`;
+this endpoint remains for clients that only need parsed legs and for internal
+reuse. Its request and response contract is unchanged.
 
 Request:
 
 ```json
 {
   "message": "sell 732 put and buy 729 put XSP 2030-11-15",
-  "default_symbol": "SPY",
+  "default_symbol": "AAPL",
   "context": []
 }
 ```
@@ -149,7 +348,7 @@ header?: string
 reference?: { kind, strikes, direction, expiration }
 ```
 
-`default_symbol` is optional and defaults to `SPY`; the frontend should pass
+`default_symbol` is optional and defaults to `AAPL`; the frontend should pass
 its selected ticker so an omitted symbol can be resolved without guessing.
 Return structured fields only; do not include an LLM explanation. Normalize
 dates to `YYYY-MM-DD` and classify a vertical spread only when its legs satisfy
@@ -168,18 +367,27 @@ one-position explanation instead of asking which spread is meant.
 
 ## Chat scope and misuse guardrails
 
-The assistant is limited to parsing and evaluating a single option or a two-leg
-vertical spread for the selected instrument, plus questions about that analysis.
-It is not a general-purpose chatbot.
+The assistant is a scoped financial conversation about the selected instrument
+and its environment, plus drafting and evaluating a single option or a two-leg
+vertical spread. It is not a general-purpose chatbot, a coding assistant, or a
+personal-use tool.
 
-- Before any Gemini call, `POST /api/analysis/parse` enforces the message size,
-  default-symbol format, a deterministic two-leg limit, and a scope check.
-- Off-topic, nonsensical, abusive, creative-generation, prompt-injection,
-  secret-probing, and unsupported-strategy requests are refused with HTTP `422`
-  and a short `detail` message. Refusals make no Gemini call, return no analysis
-  fields, and never echo system instructions, prompts, or provider keys.
-- Oversized messages and invalid default symbols are rejected by request
-  validation before the handler runs.
+- Allow greetings, questions about the selected instrument's price, trend,
+  candlestick patterns, key levels, volatility context, and headlines, and
+  requests to build or edit a supported option position.
+- Before any Gemini call, `POST /api/chat/turn` and
+  `POST /api/analysis/parse` enforce the message size, symbol format, a
+  deterministic two-leg limit, and a scope check.
+- Off-topic, nonsensical, abusive, creative-generation, hacking,
+  credential-probing, prompt-injection, personal-use, and unsupported-strategy
+  requests are refused with a short message. A deterministic refusal makes no
+  Gemini call, returns no analysis fields, and never echoes system
+  instructions, prompts, or provider keys.
+- The structured chat router may also return `mode: "refused"`. It is not the
+  only protection: deterministic checks run first, and every model response is
+  validated against its schema.
+- Oversized messages and invalid symbols are rejected by request validation
+  before the handler runs.
 - The same deterministic limits apply to messages merged from missing-field
   follow-ups; a message with more than two buy/sell legs is refused.
 - Allowed strategies are a single long/short call or put and the four two-leg
@@ -187,8 +395,8 @@ It is not a general-purpose chatbot.
   straddles, strangles, calendars, and diagonals are out of scope.
 - The service must not be repurposed for unrelated content generation,
   personalized financial advice, trade execution or routing, market
-  manipulation, spam, or other personal use outside the intended options
-  analysis.
+  manipulation, spam, hacking, credential probing, or other personal use
+  outside the intended market and options analysis.
 - System instructions, provider keys, and internal prompts stay server-side and
   are never returned. Every Gemini response is validated against its schema.
 
@@ -208,7 +416,8 @@ symbol, message, description, legs[], current_price, source, as_of
   price; fall back to the nearest executable strike below the price.
 - Pick the next lower executable put strike as the long leg.
 - `message` is a verbose sentence containing every parser field and no
-  intent. Intent always comes from the chat selector. `description` explains
+  intent. Intent is inferred by `/api/chat/turn` from the message, defaulting to
+  open. `description` explains
   the mechanics in plain language. The chat submits `message` immediately
   instead of rendering `description` as a separate assistant bubble.
 - Both are regenerated per request, so the expiration and strikes follow the
@@ -266,8 +475,8 @@ Request:
   `shift`, `widen`, `narrow`, `expiration`). The server resolves it against
   the real listed strike ladder before validating or calculating anything.
   A reference without context returns `422`.
-- Intent always comes from the client selector; it is never inferred from the
-  position text.
+- The chat client sends the intent inferred by `/api/chat/turn`; this endpoint
+  echoes it and does not infer intent itself.
 
 Response `AnalysisResult`:
 
@@ -331,8 +540,10 @@ Conventions:
 - `recommendation` comes from one Gemini synthesis call and must use only the
   supplied facts. It must not define the strategy or give trade instructions.
   The disclaimer is added deterministically, not by the model.
-- The whole flow makes at most two Gemini calls: one extraction call in `parse`
-  and one synthesis call in `run`.
+- A chat-driven analysis makes at most two Gemini calls: one structured chat
+  call in `/api/chat/turn` (routing and extraction) and one synthesis call in
+  `run`. Clients that use the standalone `parse` endpoint instead make one
+  extraction call there and one synthesis call in `run`.
 
 Example response values for the request above, given executable quotes and a
 chain with a matching contract:
@@ -414,6 +625,29 @@ Event shapes, one JSON object per line:
   and the next lower strike, and returns a verbose message without an intent.
   Verify `Use example` submits that message immediately and that the user can
   edit it from the message's edit-in-input icon.
+- Verify `POST /api/chat/turn` returns `answer` for a greeting and for a
+  trend/pattern question, grounded in the supplied snapshot, with no analysis
+  card and no invented values.
+- Verify an option request returns `confirm` with a suggested expiration and
+  near-money strike, and that a plain "yes" runs the analysis. Verify the
+  default spread width is two listed strike steps.
+- Verify "wider by two steps", "make it a put", and "change the expiration"
+  update the draft against the listed ladder.
+- Verify an explicit switch command returns `switch.explicit: true`, an
+  exploratory question returns `false`, and an option request for another
+  symbol returns `pending_draft` with `explicit: false`.
+- Verify a chat turn makes at most one Gemini call, a deterministic refusal
+  makes zero, and a confirmed analysis adds exactly one synthesis call.
+- Verify the chat snapshot is validated and size-limited and is never used for
+  analysis metrics.
+- Verify off-topic, hacking, credential-probing, personal-use, and
+  prompt-injection messages return `mode: "refused"` with no analysis fields.
+- Verify close or roll wording changes the draft and response intent, and the
+  analysis request uses that inferred intent.
+- Verify the chat UI has no intent selector and no redundant "card added"
+  acknowledgement.
+- Verify a busy chat turn shows a neutral "Thinking…" status, and a cancelled
+  or replaced chat turn leaves no failed activity step or "Cancelled" text.
 - Verify the stream endpoint emits only real stages, an early `position`, a
   `news` event when headlines exist, and a final `result`; verify an `error`
   event ends the stream with the expected status.
@@ -437,18 +671,20 @@ Event shapes, one JSON object per line:
   prompt-injection requests are refused before Gemini, and that refusals expose
   no secrets or internal instructions.
 - Verify the frontend restores the selected ticker and theme from
-  `localStorage`, defaults the ticker to SPY, and applies the OS theme when no
-  choice is stored.
+  `localStorage`, defaults the ticker to AAPL, and applies the OS theme when no
+  choice is stored. Verify the popular-symbol chips are alphabetical and
+  include the documented list.
 - Verify the dashboard renders the market grid, the candlestick chart with a
   trend line and an indicator, and the news headline links.
-- Verify the AI chat is rendered directly below the market grid and chart, and
-  prompts for missing fields before analysis.
+- Verify the AI chat is rendered directly below the market grid and chart,
+  greets the user, answers market questions, enters an option draft on an
+  option request, and returns to the conversation after an analysis card.
 - Verify Cancel aborts the active request, a new message cancels the previous
   request, and auto-scroll pauses while the user is reading older messages and
   resumes at the bottom.
-- Verify "Retry failed step" repeats parsing after an extraction failure and
-  repeats only the analysis call after an analysis failure, without re-sending
-  the user message or repeating extraction.
+- Verify a failed chat turn is retried without duplicating the user message, and
+  a failed analysis retries only the analysis call with the already confirmed
+  position, without repeating the chat turn or extraction.
 - Verify every successful answer appends its analysis card inline in the chat,
   so multiple cards remain comparable, and that the card shows the intent badge,
   the 1-sigma and 2-sigma ranges, and the playbook event-sensitivity caption.

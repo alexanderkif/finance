@@ -3,7 +3,8 @@
 Options Strategy Assistant: an Angular 22 SSR frontend and FastAPI backend,
 deployed together as Vercel Services. The dashboard shows a selected
 instrument, key levels, market context, news headlines, an ApexCharts
-candlestick chart, and an AI chat for options analysis.
+candlestick chart, and a scoped AI chat for market conversation and options
+analysis.
 
 The current market data comes from free, non-commercial provider tiers: CBOE
 delayed options/quote/VIX, CBOE index history for XSP/VIX candles, Twelve Data
@@ -42,6 +43,7 @@ vercel dev
 http://localhost:3000/api/market/SPY
 http://localhost:3000/api/chart/SPY?range=6mo
 http://localhost:3000/api/options/chain/SPY
+POST /api/chat/turn
 POST /api/analysis/parse
 POST /api/analysis/run
 POST /api/analysis/run/stream
@@ -110,7 +112,7 @@ npm run build
 
 ## Dashboard
 
-The dashboard opens on SPY and is organised top to bottom:
+The dashboard opens on AAPL and is organised top to bottom:
 
 1. A responsive card grid with the instrument selector (persisted in
    `localStorage`), current price and change, support/resistance computed from
@@ -119,13 +121,22 @@ The dashboard opens on SPY and is organised top to bottom:
    support/resistance annotations, and user-added trend lines. XSP/VIX candles
    come from CBOE daily history and do not include volume, so the volume pane
    is hidden for those symbols with an explanatory note.
-3. The AI chat for describing an option position or spread, with missing-field
-   prompts, an intent selector, and a deterministic analysis card appended
-   inline for every answer so results stay comparable. The chat streams real
-   analysis stages, shows the interpreted position before the result, and lists
-   recent ticker headlines as context. Follow-ups such as "the same spread, two
-   strikes higher" reuse the client-held previous positions. Completed analyses
-   show 1-sigma and 2-sigma ranges, volatility context, and playbook event
+3. The scoped AI chat. By default it holds a financial conversation about the
+   selected instrument using the already-loaded price, VIX, levels, candles,
+   indicators, and headlines, with answers and helper text in the question's
+   language (English/Russian templates; model answers also cover other
+   languages). It answers trend, candlestick-pattern, key-level, volatility,
+   and news questions without inventing values. An option request opens a
+   guided draft that proposes a live strike and expiration; a plain "yes"
+   accepts, and edits such as "wider by two steps" update it. The chat infers
+   the intent from the message (open by default) and appends a deterministic
+   analysis card inline for every confirmed answer. It streams real analysis
+   stages, shows the interpreted position before the result, and lists recent
+   ticker headlines as context. Follow-ups such as "the same spread, two strikes higher" reuse the
+   client-held previous positions, and the chat returns to the conversation
+   after every card. Explicit switch commands change the selected instrument
+   immediately; exploratory questions ask first. Completed analyses show
+   1-sigma and 2-sigma ranges, volatility context, and playbook event
    sensitivity. `Use example` submits immediately without an intent in the
    message, and user messages can be copied back into the input for editing.
    Enter sends, and Shift+Enter inserts a new line. The conversation height can
@@ -145,18 +156,21 @@ Enter, cancel with Escape).
 
 ## Chat scope and misuse protection
 
-The assistant is limited to a single option or a two-leg vertical spread for the
-selected instrument and to questions about that analysis. It is not a
-general-purpose chatbot. Before any Gemini call, the API applies deterministic
+The assistant is a scoped financial conversation about the selected instrument
+and its environment, plus drafting and evaluating a single option or a two-leg
+vertical spread. It is not a general-purpose chatbot, a coding assistant, or a
+personal-use tool. Before any Gemini call, the API applies deterministic
 message-size, leg-count, symbol, and strategy checks and refuses off-topic,
-nonsensical, abusive, creative-generation, prompt-injection, secret-probing, and
-unsupported-strategy requests with a short message and no analysis. Refusals
-make no Gemini call. System instructions, provider keys, and internal prompts
-stay server-side and are never returned.
+nonsensical, abusive, creative-generation, hacking, credential-probing,
+prompt-injection, personal-use, and unsupported-strategy requests with a short
+message and no analysis. Deterministic refusals make no Gemini call. System
+instructions, provider keys, and internal prompts stay server-side and are
+never returned.
 
 The service must not be repurposed for unrelated content generation,
 personalized financial advice, trade execution or routing, market manipulation,
-spam, or other personal use outside the intended options analysis.
+spam, hacking, credential probing, or other personal use outside the intended
+market and options analysis.
 
 ## Providers and licence note
 

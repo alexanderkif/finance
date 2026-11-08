@@ -47,7 +47,7 @@ Update `CHANGELOG_LATEST.md` with each completed phase.
       and missing expiration.
 - **GATE 2:** passed on 2026-10-29. All four vertical spreads, all four single
   legs, and the differing-expiration case pass; `sell 732 put and buy 729 put
-  XSP 2026-11-20` resolves to `bull_put_spread`; `buy call SPY 600` returns
+XSP 2026-11-20` resolves to `bull_put_spread`; `buy call SPY 600` returns
   exactly `missing_fields: ["expiration"]`. Backend suite: 37 tests, 0 failures
   (`python -m unittest discover -s api -p "test_*.py"`). Gemini calls are
   covered by mocked contract tests; no live model call was recorded.
@@ -86,9 +86,10 @@ Update `CHANGELOG_LATEST.md` with each completed phase.
       Finnhub news with independent degradation and per-section sources.
 - [x] Rewrite the Angular frontend; remove the legacy AAPL dashboard and Yahoo
       Finance data services.
-- [x] Add the top dashboard grid: instrument selector defaulting to SPY and
-      persisted in `localStorage`, price and change, support/resistance, brief
-      market context, and 1–3 news headline links.
+- [x] Add the top dashboard grid: instrument selector defaulting to SPY at the
+      time (superseded by Phase 11: AAPL) and persisted in `localStorage`,
+      price and change, support/resistance, brief market context, and 1–3 news
+      headline links.
 - [x] Add light and dark themes, persisted client-side, defaulting to the OS
       preference, applied before hydration.
 - [x] Install `ng-apexcharts` and render candlesticks with API-provided SMA/RSI
@@ -192,7 +193,7 @@ Update `CHANGELOG_LATEST.md` with each completed phase.
 - [x] Submit `Use example` immediately without a separate description bubble
       and let the user edit it from the user message's edit-in-input icon.
 - Evidence on 2026-11-04: backend 97 tests pass; frontend 51 tests pass;
-      production build succeeds.
+  production build succeeds.
 
 ## Volatility context [x]
 
@@ -206,10 +207,10 @@ Update `CHANGELOG_LATEST.md` with each completed phase.
 - [x] Show current IV, HV, HV percentile, and IV/HV in the analysis card, with
       `hv_unavailable` degradation when candles are missing.
 - Evidence on 2026-11-04: live CBOE XSP history returned 260 candles with
-      HV 20d 11.37%, HV 60d 10.13%, and HV percentile 46.55%; Twelve Data SPY
-      returned 260 candles with HV 20d 13.25%, HV 60d 10.71%, and HV percentile
-      67.67%. Backend: 97 tests pass; frontend: 47 tests pass; production build
-      succeeds.
+  HV 20d 11.37%, HV 60d 10.13%, and HV percentile 46.55%; Twelve Data SPY
+  returned 260 candles with HV 20d 13.25%, HV 60d 10.71%, and HV percentile
+  67.67%. Backend: 97 tests pass; frontend: 47 tests pass; production build
+  succeeds.
 
 ## Chat resilience and error guidance [x]
 
@@ -335,3 +336,83 @@ Update `CHANGELOG_LATEST.md` with each completed phase.
   intent, and the chat test proves the selected Intent value appears on the
   resulting analysis card. Backend: 108 tests pass; frontend: 59 tests pass;
   build succeeds.
+
+## Phase 11 - Conversational chat and guided option draft [x]
+
+### Phase A — Contract and documentation
+
+- [x] Define the scoped conversational chat and option-drafting contract in
+      [PRD.md](PRD.md).
+- [x] Add `POST /api/chat/turn` modes, request/response schemas, switch
+      behavior, draft suggestions, grounding, and cost rules to
+      [API_SPEC.md](API_SPEC.md).
+- [x] Add the chat boundary, module layout, one-call invariant, and
+      deterministic helper modules to [ARCHITECTURE.md](ARCHITECTURE.md).
+- [x] Document draft suggestion defaults in
+      [PLAYBOOK_SPEC.md](PLAYBOOK_SPEC.md).
+- [x] Document the client market snapshot as non-authoritative context in
+      [DATA_CONTRACT.md](DATA_CONTRACT.md).
+- [x] Update [src/AGENTS.md](src/AGENTS.md) with the chat state machine, draft
+      card, switch rules, AAPL default, and alphabetical chips.
+- [x] Review and approve the Phase 11 contract before implementation.
+
+### Phase B — Backend
+
+- [x] Add `agent/chat.py`, `core/chat_models.py`, `core/market_digest.py`,
+      `core/patterns.py`, `core/draft_suggestions.py`, `core/option_parsing.py`,
+      and `routers/chat.py`.
+- [x] Implement `POST /api/chat/turn` with `answer`, `draft`, `confirm`,
+      `switch_symbol`, and `refused` modes.
+- [x] Reuse extraction, classification, reference edits, and the listed strike
+      ladder for draft suggestions.
+- [x] Extend `api/core/guardrails.py` for the new scope while keeping
+      deterministic refusals.
+- [x] Add backend tests for modes, grounding, switch behavior, draft edits,
+      red-team refusals, the one-call invariant, and snapshot isolation.
+
+### Phase C — Frontend
+
+- [x] Replace the parse-first flow with the chat state machine.
+- [x] Add the editable draft card, confirmation, cancellation, and
+      continuation-after-switch behavior.
+- [x] Return to the conversational mode after every analysis card.
+- [x] Default the instrument to AAPL and render the alphabetical chips.
+- [x] Add frontend tests for every mode and the post-card return.
+
+### Chat UX refinements
+
+- [x] Remove the chat-turn interpreting activity and do not render
+      cancelled/replaced stages as failed.
+- [x] Remove the redundant "Card added" assistant message.
+- [x] Replace the Intent selector with inferred intent (open by default).
+- [x] Add backend/frontend tests for intent inference and the removed messages.
+
+### Chat localization
+
+- [x] Localize deterministic backend chat text for English and Russian via
+      `core/chat_i18n.py`.
+- [x] Localize frontend chat copy, errors, role labels, activity labels, and
+      draft/switch helper text via `chat-copy.ts` and `api-error.ts`.
+- [x] Add Russian localization tests for confirm, cancel, switch, refusal,
+      chain failure, stage labels, and chat copy.
+- Evidence on 2026-11-08: backend 139 tests pass; frontend 68 tests pass; the
+  production build succeeds. A live UTF-8 Russian option request returned a
+  Russian confirm.
+
+### Phase D — Verification
+
+- [x] Run backend and frontend suites and the production build.
+- [x] Complete the `vercel dev` browser pass in GATE 11.
+- [x] Record the current test/build evidence here and in
+      `CHANGELOG_LATEST.md`.
+
+- Evidence on 2026-11-08: backend 139 tests pass; frontend 68 tests pass; the
+  production build succeeds. A live `uvicorn index:app` check returned an
+  explicit MSFT switch, a grounded English trend answer, a Russian trend
+  answer, a live `Long Call AAPL 245 2026-12-18` draft, and `intent: "close"`
+  for "I want to close my long call". A fresh `vercel dev` on :3000 served
+  `/api/chat/turn` and `ChatTurnResponse.intent`; headless Chrome rendered
+  "Market chat" and "Instrument: AAPL" with no Intent selector; the dev logs
+  showed `/api/chat/turn` and `/api/analysis/run/stream` 200 with live Gemini,
+  CBOE, Twelve Data, and Finnhub calls.
+- **GATE 11:** passed on 2026-11-08.

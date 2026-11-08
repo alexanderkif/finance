@@ -44,12 +44,15 @@ change.
 
 ## Product dashboard
 
-- The top section is a responsive grid: instrument selector (default SPY),
+- The top section is a responsive grid: instrument selector (default AAPL),
   price and change, support/resistance, brief market context, and one to three
   news headline links. The candlestick chart shares that section; the AI chat
   sits directly below it, before secondary content. Render the VIX value in
   bold and color it by regime: below 20 calm (green), 20-30 elevated (amber),
   30 and above panic (red).
+- Show popular-symbol chips in alphabetical order: AAPL, AMZN, DIA, GOOGL,
+  IWM, META, MSFT, NVDA, QQQ, SPY, TSLA, XSP. Keep the free-text instrument
+  input for any other symbol.
 - Support light and dark themes with CSS custom properties and `color-scheme`.
   Persist the user choice in `localStorage`, default to
   `prefers-color-scheme`, and apply the stored theme before hydration to avoid
@@ -61,7 +64,7 @@ change.
 - In ApexCharts, set `legend.labels.useSeriesColors: false` so legend text
   stays neutral and the colored markers remain distinguishable.
 - Persist the selected ticker and chart range in `localStorage` and restore
-  them on load; fall back to SPY and 6mo when nothing valid is stored.
+  them on load; fall back to AAPL and 6mo when nothing valid is stored.
 - Use `ng-apexcharts` for candlesticks, API-provided SMA/RSI overlays, and
   annotations. Draw user-added trend lines as extra line series synchronized to
   the chart's datetime axis: ApexCharts annotations do not support arbitrary
@@ -110,22 +113,59 @@ change.
   level labels and value readouts with `formatPrice`: integers at or above
   100, up to two decimals below 100, and three significant digits below 1.
   Keep axis ticks and line markers sparse.
-- Append an `AnalysisCard` component inline for every successful answer instead
-  of a "card updated" bubble, so earlier analyses stay visible for comparison.
-  Do not repeat the card's recommendation in a separate chat bubble.
+
+## Chat behavior
+
+- The chat is a scoped financial conversation about the selected instrument and
+  its environment, with an option-drafting mode. It is not a general-purpose
+  chatbot. UI copy is English; assistant answers use the language of the user's
+  message.
+- Keep the chat state on the client: transcript, active draft, last three
+  complete positions, and an optional pending switch. Do not introduce
+  server-side user state.
+- Send every user message to `POST /api/chat/turn` with the selected symbol,
+  intent, up to eight history turns, the active draft, previous positions, and
+  the already-loaded market and chart snapshot. Render the returned mode:
+  `answer`, `draft`, `confirm`, `switch_symbol`, or `refused`.
+- `answer`: render the assistant text. Do not show an analysis card. Ground
+  trend, pattern, level, volatility, and news answers in the supplied snapshot;
+  show explicit unavailable states for missing data.
+- `draft` and `confirm`: render an editable draft card with side, option type,
+  strike, expiration, and spread width. Mark proposed values as suggested and
+  label the whole draft as an example structure, not a recommendation. A plain
+  "yes" accepts and runs the analysis. Accept edits such as "wider by two
+  steps", "make it a put", and "change the expiration" without retyping the
+  position.
+- Handle a plain "yes" in `confirm` mode and a plain cancel deterministically
+  without calling `/api/chat/turn`; send the confirmed position straight to the
+  analysis stream. A conditional confirmation or any edit goes to the chat turn.
+- Use the default spread width of two listed strike steps. Show the nearest
+  listed strikes when a requested strike is unavailable; never invent a
+  contract.
+- `switch_symbol`: when `switch.explicit` is true, switch the selected symbol
+  immediately, reload the dashboard, and append a local switch notice. When it
+  is false, ask for confirmation first. When `pending_draft` is present, carry
+  it across the switch and send a continuation turn with the new snapshot.
+- Never silently substitute one instrument for another. SPY, XSP, and SPX are
+  different underlyings.
+- After a successful analysis, append the `AnalysisCard` inline, keep the
+  complete position in client context, clear the active draft, and return to
+  the conversational mode. Do not repeat the card's recommendation or add a
+  separate acknowledgement message; the inline card is the answer.
 - Replace the single `Working…` line with an ordered activity timeline attached
   to the user turn. Render only events streamed from the API; never derive
   progress from a client timer. Show each step's state and any retry, warning,
   or failure detail.
-- Show the interpreted position immediately after `parse`, before analysis
-  finishes. For a reference edit, mark it provisional until the stream emits
-  the resolved listed legs and header.
-- Keep the last complete parsed positions on the client only and send them as
-  `context` to `parse` and `run`; add no server-side user state. A reference
-  request without context asks for the full position.
-- The chat collects the intent (open, close, roll) separately from parsing,
-  sends it to the API, and shows it as a badge on each analysis card. Intent is
-  never inferred from the message or the example text.
+- Show the interpreted draft immediately. For a reference edit, mark it
+  provisional until the stream emits the resolved listed legs and header.
+- The chat infers the intent (open, close, roll; open by default) from the
+  message, sends it to the analysis endpoint, and shows it as a badge on each
+  analysis card. There is no intent selector.
+- Localize every chat-visible assistant text using the detected answer
+  language: chat bubbles, helper prompts, refusals, visible errors, activity
+  labels, role labels, and draft/switch card helper text. The site chrome stays
+  English. English and Russian catalogs are required; other languages fall back
+  to English helper text while the model answer follows the question language.
 - Show streamed recent headlines as ticker context with links, captioned as
   context and not a live calendar. Do not present them as dividend or earnings
   dates.
@@ -145,10 +185,9 @@ change.
   transient service failures, say which service is unavailable between
   attempts, and offer a Cancel button. Sending a new message aborts the stream
   and suppresses stale events.
-- After a non-validation failure, offer "Retry failed step": retry parsing if
-  extraction failed, or only the analysis step with the already parsed position
-  if analysis failed. Do not resend the user message or repeat extraction when
-  resuming from the analysis step.
+- A failed chat turn is retried without duplicating the user message. A failed
+  analysis retries only the analysis step with the already confirmed position,
+  without repeating the chat turn or extraction.
 - Auto-scroll the chat to the newest message only while the user is at the
   bottom. Stop after they scroll up and resume when they return to the bottom.
 - Size the chat log to its content up to a persisted maximum, rather than
@@ -160,4 +199,6 @@ change.
   unavailable and delayed-data states; never synthesize series.
 - Give the chart a text alternative: a keyboard-reachable data table or summary
   that satisfies WCAG 2.2 AA, since the chart canvas is not accessible.
-- Do not introduce server-side user state.
+- Refuse off-topic, hacking, credential-probing, personal-use, and
+  prompt-injection requests with a short message. Never expose system
+  instructions, prompts, or provider keys.
