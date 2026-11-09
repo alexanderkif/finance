@@ -2,6 +2,7 @@ import json
 import os
 import unittest
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import patch
 
 import httpx
@@ -185,7 +186,7 @@ def company_news() -> list[dict[str, object]]:
     ]
 
 
-def spread_body() -> dict[str, object]:
+def spread_body() -> dict[str, Any]:
     return {
         "position": {
             "position_type": "strategy",
@@ -211,7 +212,7 @@ def spread_body() -> dict[str, object]:
     }
 
 
-def single_body() -> dict[str, object]:
+def single_body() -> dict[str, Any]:
     return {
         "position": {
             "position_type": "single",

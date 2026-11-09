@@ -2,16 +2,17 @@ import json
 import os
 import unittest
 from datetime import UTC, date, datetime, timedelta
+from typing import Any
 from unittest.mock import patch
 
 import httpx
 from core.cboe_provider import CboeOptionQuote
 from core.chat_models import ChatDraft, ChatDraftLeg, ChatMarketSnapshot
 from core.draft_suggestions import complete_draft
-from core.indicators import Candle, IndicatorPoint, IndicatorSeries
+from core.indicators import Candle
 from core.market_digest import build_market_digest
 from core.patterns import detect_patterns
-from core.playbook_registry import load_playbooks
+from core.playbook_registry import PlaybookKey, load_playbooks
 from index import app
 
 STRIKES = [220, 225, 230, 235, 240, 245, 250, 255, 260]
@@ -121,7 +122,7 @@ def snapshot(symbol: str = "AAPL") -> dict[str, object]:
     }
 
 
-def base_request(message: str, **overrides: object) -> dict[str, object]:
+def base_request(message: str, **overrides: object) -> dict[str, Any]:
     body: dict[str, object] = {
         "symbol": "AAPL",
         "message": message,
@@ -773,7 +774,7 @@ class DraftSuggestionTests(unittest.TestCase):
             for side in ("P", "C")
         ]
 
-    def complete(self, hint: str, legs: list[ChatDraftLeg]):
+    def complete(self, hint: PlaybookKey, legs: list[ChatDraftLeg]):
         draft = ChatDraft(
             position_type="single" if len(legs) == 1 else "strategy",
             legs=legs,
@@ -797,7 +798,7 @@ class DraftSuggestionTests(unittest.TestCase):
         self.assertEqual(result.draft.legs[0].side, "buy")
 
     def test_spreads_use_two_listed_steps(self) -> None:
-        cases = {
+        cases: dict[PlaybookKey, str] = {
             "bull_put_spread": "Bull Put Spread AAPL 240/230 2026-12-18",
             "bear_call_spread": "Bear Call Spread AAPL 250/260 2026-12-18",
             "bull_call_spread": "Bull Call Spread AAPL 255/245 2026-12-18",

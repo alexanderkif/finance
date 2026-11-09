@@ -31,9 +31,10 @@ api/
 │   ├── indicators.py        # deterministic SMA/RSI and pivot levels
 │   ├── metrics.py           # deterministic calculations only
 │   └── playbooks/           # JSON playbook definitions
-└── agent/
-    ├── graph.py
-    └── prompts.py
+├── agent/
+│   ├── graph.py
+│   └── prompts.py
+└── tests/                   # unittest suite; `api/` is the import root
 ```
 
 The conversational flow adds `routers/chat.py` for `POST /api/chat/turn`,

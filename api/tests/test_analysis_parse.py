@@ -6,9 +6,9 @@ from typing import Literal
 from unittest.mock import patch
 
 import httpx
+from core.option_parsing import ParsedLeg, classify_strategy, classify_vertical
 from core.playbook_registry import PlaybookKey
 from index import app
-from routers.analysis import ParsedLeg, classify_strategy, classify_vertical
 
 Side = Literal["buy", "sell"]
 OptionType = Literal["call", "put"]
