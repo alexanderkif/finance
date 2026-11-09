@@ -35,6 +35,8 @@ interface ChartWithGlobals {
 
 type ChartPane = 'price' | 'volume' | 'rsi';
 
+const AXIS_LABEL_WIDTH = 64;
+
 @Component({
   selector: 'app-price-chart',
   imports: [ChartComponent, DatePipe, DecimalPipe],
@@ -184,6 +186,15 @@ export class PriceChart {
     return times.length > 0 ? times[times.length - 1] + this.rightPadding() : null;
   });
 
+  private readonly xAxisBounds = computed<{ min: number; max: number } | null>(() => {
+    const times = this.candleTimes();
+    const edge = this.rightEdge();
+    if (times.length === 0 || edge === null) {
+      return null;
+    }
+    return { min: times[0], max: edge };
+  });
+
   private readonly initialYRange = computed(() => this.rangeFor(this.data().candles));
 
   protected readonly series = computed<ApexAxisChartSeries>(() => {
@@ -233,7 +244,7 @@ export class PriceChart {
   protected readonly options = computed<ApexOptions>(() => {
     const palette = this.palette();
     const initialRange = this.initialYRange();
-    const times = this.candleTimes();
+    const bounds = this.xAxisBounds();
     return {
       chart: {
         id: 'price-chart',
@@ -286,8 +297,8 @@ export class PriceChart {
       },
       xaxis: {
         type: 'datetime',
-        min: times.length > 0 ? times[0] : undefined,
-        max: times.length > 0 ? times[times.length - 1] + this.rightPadding() : undefined,
+        min: bounds?.min,
+        max: bounds?.max,
         tickAmount: 6,
         labels: {
           show: this.bottomChart() === 'price',
@@ -326,6 +337,7 @@ export class PriceChart {
 
   protected readonly volumeOptions = computed<ApexOptions>(() => {
     const palette = this.palette();
+    const bounds = this.xAxisBounds();
     return {
       chart: {
         id: 'volume-chart',
@@ -351,6 +363,8 @@ export class PriceChart {
       },
       xaxis: {
         type: 'datetime',
+        min: bounds?.min,
+        max: bounds?.max,
         tickAmount: 6,
         labels: {
           show: this.bottomChart() === 'volume',
@@ -380,6 +394,7 @@ export class PriceChart {
 
   protected readonly rsiOptions = computed<ApexOptions>(() => {
     const palette = this.palette();
+    const bounds = this.xAxisBounds();
     return {
       chart: {
         id: 'rsi-chart',
@@ -401,6 +416,8 @@ export class PriceChart {
       legend: { show: false },
       xaxis: {
         type: 'datetime',
+        min: bounds?.min,
+        max: bounds?.max,
         tickAmount: 6,
         labels: {
           show: this.bottomChart() === 'rsi',
@@ -416,7 +433,8 @@ export class PriceChart {
         tickAmount: 2,
         opposite: true,
         labels: {
-          minWidth: 44,
+          minWidth: AXIS_LABEL_WIDTH,
+          maxWidth: AXIS_LABEL_WIDTH,
           formatter: (value: number) => formatAxisTick(value, 100, 2),
           style: { colors: palette.text },
         },
@@ -446,11 +464,9 @@ export class PriceChart {
 
   protected onChartReady(chart: ApexCharts): void {
     this.chartInstance.set(chart);
-    const candles = this.data().candles;
-    if (candles.length > 0) {
-      const first = candles[0];
-      const last = candles[candles.length - 1];
-      this.scaleYToRange(new Date(first.t).getTime(), new Date(last.t).getTime());
+    const bounds = this.xAxisBounds();
+    if (bounds) {
+      this.scaleYToRange(bounds.min, bounds.max);
     }
   }
 
@@ -465,7 +481,7 @@ export class PriceChart {
   }
 
   private applyVisibleRange(chart: ApexCharts): void {
-    const range = this.visibleRange();
+    const range = this.visibleRange() ?? this.xAxisBounds();
     if (!range) {
       return;
     }
@@ -677,7 +693,8 @@ export class PriceChart {
       stepSize: scale && scale.step > 0 ? scale.step : undefined,
       opposite: true,
       labels: {
-        minWidth: 44,
+        minWidth: AXIS_LABEL_WIDTH,
+        maxWidth: AXIS_LABEL_WIDTH,
         formatter: (value: number) => formatAxisTick(value, span, intervals),
         style: { colors: palette.text },
       },
@@ -694,7 +711,8 @@ export class PriceChart {
       stepSize: scale.step > 0 ? scale.step : undefined,
       opposite: true,
       labels: {
-        minWidth: 44,
+        minWidth: AXIS_LABEL_WIDTH,
+        maxWidth: AXIS_LABEL_WIDTH,
         formatter: (value: number) => formatVolume(value),
         style: { colors: palette.text, fontSize: '9px' },
       },
