@@ -429,11 +429,13 @@ def _reference_from_output(output: ChatModelOutput) -> ReferenceEdit | None:
     if reference is None or reference.kind is None:
         return None
     try:
-        return ReferenceEdit(
-            kind=reference.kind,
-            strikes=reference.strikes,
-            direction=reference.direction,
-            expiration=parse_expiration(reference.expiration),
+        return ReferenceEdit.model_validate(
+            {
+                "kind": reference.kind,
+                "strikes": reference.strikes,
+                "direction": reference.direction,
+                "expiration": parse_expiration(reference.expiration),
+            }
         )
     except (ValueError, ValidationError, GeminiResponseError):
         return None

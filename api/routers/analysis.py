@@ -1,4 +1,3 @@
-import asyncio
 import json
 import re
 from collections.abc import AsyncGenerator, Awaitable, Callable
@@ -21,7 +20,6 @@ from core.finnhub_provider import (
     FinnhubRequestError,
     NewsHeadline,
 )
-from core.guardrails import GuardrailViolation, check_chat_request
 from core.gemini_provider import (
     ExtractedPosition,
     GeminiConfigurationError,
@@ -30,13 +28,13 @@ from core.gemini_provider import (
     GeminiResponseError,
     extract_position,
 )
+from core.guardrails import GuardrailViolation, check_chat_request
 from core.indicators import Candle
 from core.metrics import AnalysisPosition, OptionLeg, format_header
 from core.option_parsing import (
     FIELD_ORDER,
     ParsedLeg,
     classify_strategy,
-    classify_vertical,
     parse_expiration,
 )
 from core.playbook_registry import Playbook, PlaybookKey, load_playbooks
@@ -192,19 +190,30 @@ def build_parse_response(
     elif strategy_key is not None and not missing_fields:
         response["header"] = format_header(
             _PLAYBOOKS[strategy_key].display_name,
-            [
-                OptionLeg(
-                    symbol=leg.symbol,
-                    side=leg.side,
-                    option_type=leg.option_type,
-                    strike=leg.strike,
-                    expiration=leg.expiration,
-                )
-                for leg in legs
-            ],
+            [_complete_leg(leg) for leg in legs],
         )
 
     return ParseResponse.model_validate(response)
+
+
+def _complete_leg(leg: ParsedLeg) -> OptionLeg:
+    if (
+        leg.side is None
+        or leg.option_type is None
+        or leg.strike is None
+        or leg.expiration is None
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="The option position is missing required fields.",
+        )
+    return OptionLeg(
+        symbol=leg.symbol,
+        side=leg.side,
+        option_type=leg.option_type,
+        strike=leg.strike,
+        expiration=leg.expiration,
+    )
 
 
 def _parse_reference(
@@ -323,14 +332,15 @@ def _prepare_run(
             )
         base = body.context[-1]
         symbol = base.legs[0].symbol
-        expiration = body.reference.expiration or base.legs[0].expiration
+        reference = body.reference
+        expiration = reference.expiration or base.legs[0].expiration
 
         def resolve_reference(
             contracts: list[CboeOptionQuote],
             _as_of: datetime,
         ) -> tuple[AnalysisPosition, PlaybookKey, Playbook]:
             position = resolve_reference_position(
-                body.reference,
+                reference,
                 body.context,
                 contracts,
                 expiration,
@@ -547,7 +557,13 @@ async def get_analysis_example(
             detail="An underlying quote is required to build an example.",
         )
 
-    as_of = chain.as_of.date()
+    if chain.as_of is None:
+        raise HTTPException(
+            status_code=422,
+            detail="The option chain is unavailable for this symbol.",
+        )
+    as_of_at = chain.as_of
+    as_of = as_of_at.date()
     puts = []
     for contract in chain.contracts:
         parsed = parse_occ_symbol(contract.option)
@@ -627,7 +643,7 @@ async def get_analysis_example(
             ),
         ],
         current_price=quote.price,
-        as_of=chain.as_of,
+        as_of=as_of_at,
     )
 
 

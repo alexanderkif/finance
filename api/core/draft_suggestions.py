@@ -3,10 +3,12 @@ from typing import Literal
 
 from core.cboe_provider import CboeOptionQuote
 from core.chat_models import ChatDraft, ChatDraftLeg, ChatDraftSuggestions
-from core.metrics import AnalysisPosition, OptionLeg, format_header
+from core.metrics import AnalysisPosition, OptionLeg, OptionType, Side, format_header
 from core.option_parsing import (
     ParsedLeg,
     classify_strategy,
+)
+from core.option_parsing import (
     missing_fields as strategy_missing_fields,
 )
 from core.playbook_registry import Playbook, PlaybookKey
@@ -28,7 +30,7 @@ class DraftCompletion(BaseModel):
     confirm_position: AnalysisPosition | None
 
 
-_STRATEGY_LEGS: dict[PlaybookKey, list[tuple[str, str, LegRole]]] = {
+_STRATEGY_LEGS: dict[PlaybookKey, list[tuple[Side, OptionType, LegRole]]] = {
     "long_call": [("buy", "call", "long")],
     "long_put": [("buy", "put", "long")],
     "short_call": [("sell", "call", "short")],
@@ -275,7 +277,7 @@ def _infer_strategy(legs: list[ChatDraftLeg]) -> PlaybookKey | None:
 
 def _rebuild_legs(
     legs: list[ChatDraftLeg],
-    expected: list[tuple[str, str, LegRole]],
+    expected: list[tuple[Side, OptionType, LegRole]],
     suggested: set[str],
 ) -> list[ChatDraftLeg]:
     supplied = legs[0]
@@ -303,7 +305,7 @@ def _rebuild_legs(
 
 def _assign_sides_types(
     legs: list[ChatDraftLeg],
-    expected: list[tuple[str, str, LegRole]],
+    expected: list[tuple[Side, OptionType, LegRole]],
     suggested: set[str],
 ) -> None:
     for index, (side, option_type, _) in enumerate(expected):
@@ -328,7 +330,7 @@ def _assign_sides_types(
 
 def _assign_strikes(
     legs: list[ChatDraftLeg],
-    expected: list[tuple[str, str, LegRole]],
+    expected: list[tuple[Side, OptionType, LegRole]],
     ladder: list[float],
     underlying_price: float | None,
     strategy_key: PlaybookKey,
@@ -487,7 +489,7 @@ def _select_expiration(
 
 def _expirations(
     contracts: list[CboeOptionQuote],
-    option_type: str,
+    option_type: OptionType,
 ) -> list[date]:
     from core.cboe_provider import parse_occ_symbol
 
@@ -514,7 +516,7 @@ def _strike_index(ladder: list[float], strike: float) -> int | None:
     return None
 
 
-def _index(legs: list[ChatDraftLeg], side: str) -> int | None:
+def _index(legs: list[ChatDraftLeg], side: Side) -> int | None:
     for index, leg in enumerate(legs):
         if leg.side == side:
             return index
@@ -545,7 +547,7 @@ def _text(value: float) -> str:
 
 def nearest_hint(
     contracts: list[CboeOptionQuote],
-    option_type: str,
+    option_type: OptionType,
     expiration: date,
     strike: float,
 ) -> str:

@@ -1,8 +1,8 @@
 import asyncio
 import json
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Coroutine
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 import httpx
 from core.cboe_provider import (
@@ -87,8 +87,10 @@ async def run_analysis_events(
     resolve_position: PositionResolver,
     intent: Literal["open", "close", "roll"],
     detected_language: str,
-    history_loader: Callable[[], Awaitable[list[Candle] | None]],
-    news_loader: Callable[[], Awaitable[tuple[list[NewsHeadline], list[str]]]],
+    history_loader: Callable[[], Coroutine[Any, Any, list[Candle] | None]],
+    news_loader: Callable[
+        [], Coroutine[Any, Any, tuple[list[NewsHeadline], list[str]]]
+    ],
     is_disconnected: Callable[[], Awaitable[bool]] | None = None,
 ) -> AsyncGenerator[dict[str, object], None]:
     history_task = asyncio.create_task(history_loader())
