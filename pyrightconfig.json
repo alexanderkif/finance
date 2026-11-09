@@ -1,0 +1,23 @@
+{
+  "include": [
+    "api/agent",
+    "api/core",
+    "api/routers",
+    "api/tests",
+    "api/index.py",
+    "api/settings.py",
+    "api/mcp_dev.py"
+  ],
+  "exclude": [
+    "**/.venv",
+    "**/.vercel",
+    "**/__pycache__",
+    "api/build",
+    "node_modules",
+    "dist"
+  ],
+  "venvPath": "api",
+  "venv": ".venv",
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "basic"
+}

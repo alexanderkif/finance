@@ -9,4 +9,16 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["mcp>=2,<3"]
+dev = [
+    "mcp>=2,<3",
+    "pyright>=1.1",
+    "ruff>=0.17",
+]
+
+[tool.pyright]
+include = ["agent", "core", "routers", "tests", "index.py", "settings.py", "mcp_dev.py"]
+exclude = [".venv", ".vercel", "build", "**/__pycache__"]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.14"
+typeCheckingMode = "basic"

@@ -1,0 +1,21 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/api/.venv/Scripts/python.exe",
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.diagnosticMode": "workspace",
+  "python.analysis.extraPaths": ["${workspaceFolder}/api"],
+  "python.analysis.exclude": [
+    "**/.venv",
+    "**/.vercel",
+    "**/__pycache__",
+    "api/build",
+    "node_modules",
+    "dist"
+  ],
+  "ruff.configuration": "${workspaceFolder}/ruff.toml",
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit"
+    }
+  }
+}

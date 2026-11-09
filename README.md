@@ -87,8 +87,12 @@ npm install -g vercel
 ## Проверки
 
 ```powershell
-# backend
-api\.venv\Scripts\python.exe -m unittest discover -s api -p "test_*.py"
+# backend tests
+api\.venv\Scripts\python.exe -m unittest discover -s api\tests -t api -p "test_*.py"
+
+# backend lint and types (из папки api)
+uv run ruff check .
+uv run pyright
 
 # frontend
 npm test -- --watch=false
