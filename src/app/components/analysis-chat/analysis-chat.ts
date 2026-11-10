@@ -20,8 +20,10 @@ import {
   ChatDraftSuggestions,
   ChatHistoryTurn,
   ChatMarketSnapshot,
+  ChatStep,
   ChatSwitch,
   ChatTurnResponse,
+  ChatUiAction,
   Intent,
   NewsHeadline,
   PositionLeg,
@@ -37,18 +39,7 @@ import {
 import { formatPrice } from '../../price-format';
 import { warningLabel } from '../../warning-labels';
 import { AnalysisCard } from '../analysis-card/analysis-card';
-import {
-  ChatCopy,
-  ENGLISH_COPY,
-  ENGLISH_GREETING,
-  RUSSIAN_GREETING,
-  RUSSIAN_COPY,
-  RUSSIAN_FIELD_LABELS,
-  RUSSIAN_STAGE_LABELS,
-  RUSSIAN_STAGE_PATTERNS,
-  RUSSIAN_SUGGESTION_FIELDS,
-  RUSSIAN_WARNINGS,
-} from './chat-copy';
+import { ChatCopy, ENGLISH_COPY, ENGLISH_GREETING } from './chat-copy';
 
 type ActivityState = 'running' | 'done' | 'failed';
 type ChatMode = 'explore' | 'draft' | 'confirm' | 'switch';
@@ -82,14 +73,7 @@ type RetryAction =
   | { kind: 'analysis'; position: AnalysisPosition; turnId: number };
 
 const RETRY_DELAYS_MS = [1_200, 3_000] as const;
-const YES_PATTERN =
-  /^(?:yes|y|yeah|yep|ok|okay|sure|go\s+ahead|use\s+these|use\s+it|do\s+it|analy[sz]e|да|ок|хорошо|верно|давай|подходит)[.!]?$/i;
-const CANCEL_PATTERN =
-  /^(?:cancel|start\s+over|reset|never\s*mind|not\s+now|forget\s+it|drop\s+it|отмена|начать\s+заново|сброс|не\s+сейчас|забудь)[.!]?$/i;
-const INITIAL_MESSAGE =
-  "Hi — I can explain the selected instrument's trend, candlestick patterns, " +
-  'key levels, VIX context, and recent headlines, or help you build an option ' +
-  'card. What would you like to look at?';
+
 const STRATEGY_LABELS: Record<string, string> = {
   bull_put_spread: 'Bull Put Spread',
   bear_call_spread: 'Bear Call Spread',
@@ -158,12 +142,7 @@ export class AnalysisChat {
   protected readonly confirm = signal<ChatConfirm | null>(null);
   protected readonly switchProposal = signal<ChatSwitch | null>(null);
   protected readonly pendingDraftAfterSwitch = signal<ChatDraft | null>(null);
-  protected readonly isRussian = computed(() =>
-    this.detectedLanguage().toLowerCase().startsWith('russ'),
-  );
-  protected readonly copy = computed<ChatCopy>(() =>
-    this.isRussian() ? RUSSIAN_COPY : ENGLISH_COPY,
-  );
+  protected readonly copy = computed<ChatCopy>(() => ENGLISH_COPY);
   protected readonly canSend = computed(() => this.draftText().trim().length > 0);
   protected readonly isSpread = computed(() => (this.draft()?.legs.length ?? 0) === 2);
   protected readonly canNarrow = computed(() => {
@@ -188,16 +167,13 @@ export class AnalysisChat {
   });
   protected readonly suggestedLabel = computed(() => {
     const fields = this.suggestions()?.fields ?? [];
-    const localized = this.isRussian() ? RUSSIAN_SUGGESTION_FIELDS : null;
     return fields
-      .map(
-        (field) =>
-          localized?.[field] ??
-          (field === 'long_strike'
-            ? 'long strike'
-            : field === 'option_type'
-              ? 'option type'
-              : field),
+      .map((field) =>
+        field === 'long_strike'
+          ? 'long strike'
+          : field === 'option_type'
+            ? 'option type'
+            : field,
       )
       .join(', ');
   });
@@ -206,8 +182,7 @@ export class AnalysisChat {
     if (missing.length === 0) {
       return '';
     }
-    const labels = this.isRussian() ? RUSSIAN_FIELD_LABELS : FIELD_LABELS;
-    return missing.map((field) => labels[field] ?? field).join(', ');
+    return missing.map((field) => FIELD_LABELS[field] ?? field).join(', ');
   });
   protected readonly errorMessage = errorMessage;
   protected readonly warningLabel = warningLabel;
@@ -437,7 +412,7 @@ export class AnalysisChat {
       await this.send();
     } catch (error) {
       if (!controller.signal.aborted && !isAbortError(error)) {
-        this.error.set(this.errorMessage(error, this.detectedLanguage()));
+        this.error.set(this.errorMessage(error));
         this.retryable.set(this.canRetryAfter(error) ? { kind: 'example' } : null);
       }
     } finally {
@@ -451,21 +426,7 @@ export class AnalysisChat {
   protected async send(event?: Event): Promise<void> {
     event?.preventDefault();
     const text = this.draftText().trim();
-    if (this.mode() === 'confirm' && this.confirm() && this.isYes(text)) {
-      const turnId = this.addUserMessage('Yes');
-      this.pushHistory({ role: 'user', text: 'Yes' });
-      this.draftText.set('');
-      await this.runConfirmed(turnId);
-      return;
-    }
     if (!text) {
-      return;
-    }
-    if (this.isCancel(text) && this.mode() !== 'explore') {
-      this.addUserMessage(text);
-      this.pushHistory({ role: 'user', text });
-      this.draftText.set('');
-      this.clearDraftWithMessage();
       return;
     }
     this.draftText.set('');
@@ -521,14 +482,6 @@ export class AnalysisChat {
     return `${leg.side ?? '—'} ${leg.option_type ?? '—'} ${strike} ${leg.expiration ?? '—'}`;
   }
 
-  private isYes(text: string): boolean {
-    return YES_PATTERN.test(text);
-  }
-
-  private isCancel(text: string): boolean {
-    return CANCEL_PATTERN.test(text);
-  }
-
   private clearDraftWithMessage(): void {
     this.draft.set(null);
     this.suggestions.set(null);
@@ -548,6 +501,7 @@ export class AnalysisChat {
     const continuation = options.continuation ?? false;
     const recordUser = options.recordUser ?? true;
     const turnId = recordUser ? this.addUserMessage(text) : this.nextMessageId++;
+    this.setThinkingActivity(turnId);
     this.busy.set(true);
     this.error.set(null);
     this.retryable.set(null);
@@ -591,6 +545,12 @@ export class AnalysisChat {
       context: [...this.contextStack],
       continuation,
       market: this.snapshot() ?? this.emptySnapshot(),
+      ui: {
+        theme: this.preferences.theme(),
+        symbol: this.symbol(),
+        range: this.preferences.range(),
+        chart_toggles: this.preferences.chartToggles(),
+      },
     };
   }
 
@@ -605,47 +565,62 @@ export class AnalysisChat {
     }
     this.detectedLanguage.set(response.language || this.detectedLanguage());
     this.analysisIntent = response.intent || this.analysisIntent || 'open';
-    this.localizeGreeting();
-    if (response.text.trim() && !(response.mode === 'switch_symbol' && response.switch?.explicit)) {
-      this.addAssistantMessage(response.text);
+    this.applyUiActions(response.ui_actions ?? []);
+    this.setTurnActivities(turnId, response.steps ?? []);
+    if (response.text.trim()) {
+      this.addAssistantMessage(response.text, response.card ?? undefined);
+    } else if (response.card) {
+      this.addAssistantMessage('', response.card);
     }
-    switch (response.mode) {
-      case 'answer':
-        if (response.draft) {
-          this.draft.set(response.draft);
-        }
-        break;
-      case 'draft':
-        this.draft.set(response.draft);
-        this.suggestions.set(response.suggestions);
-        this.missing.set(response.missing);
-        this.draftWarnings.set(response.warnings);
-        this.confirm.set(null);
-        this.mode.set('draft');
-        break;
-      case 'confirm':
-        this.draft.set(response.draft);
-        this.suggestions.set(response.suggestions);
-        this.missing.set([]);
-        this.draftWarnings.set(response.warnings);
-        this.confirm.set(response.confirm);
-        this.mode.set('confirm');
-        break;
-      case 'switch_symbol':
-        if (response.switch) {
-          this.pendingDraftAfterSwitch.set(response.pending_draft);
-          if (response.switch.explicit) {
-            this.performSwitch(response.switch.symbol);
-          } else {
-            this.switchProposal.set(response.switch);
-            this.mode.set('switch');
-          }
-        }
-        break;
-      case 'refused':
-        break;
+    if (response.switch?.explicit) {
+      this.performSwitch(response.switch.symbol);
     }
     this.updateTurn(turnId, (message) => ({ ...message }));
+  }
+
+  private applyUiActions(actions: ChatUiAction[]): void {
+    for (const action of actions) {
+      if (action.type === 'chart_toggle') {
+        this.preferences.setChartToggle(action.key, action.value);
+      } else if (action.type === 'theme') {
+        this.preferences.setTheme(action.value);
+      } else if (action.type === 'chart_range') {
+        this.preferences.setRange(action.value);
+      }
+    }
+  }
+
+  private setThinkingActivity(turnId: number): void {
+    this.setTurnActivities(turnId, [
+      { id: 'thinking', label: 'Thinking...', status: 'running', detail: null },
+    ]);
+  }
+
+  private setFailedActivity(turnId: number | null, label: string, detail: string): void {
+    if (turnId === null) {
+      return;
+    }
+    this.setTurnActivities(turnId, [
+      { id: 'request-failed', label, status: 'failed', detail },
+    ]);
+  }
+
+  private setTurnActivities(turnId: number, steps: ChatStep[]): void {
+    this.messages.update((messages) =>
+      messages.map((message) =>
+        message.id === turnId
+          ? {
+              ...message,
+              activities: steps.map((step) => ({
+                id: step.id,
+                label: step.label,
+                state: step.status,
+                detail: step.detail ?? undefined,
+              })),
+            }
+          : message,
+      ),
+    );
   }
 
   private async runConfirmed(turnId?: number): Promise<void> {
@@ -723,9 +698,9 @@ export class AnalysisChat {
         this.upsertActivity(
           turnId,
           event.id,
-          this.localizeStageLabel(event.label),
+          event.label,
           event.status === 'started' ? 'running' : event.status === 'done' ? 'done' : 'failed',
-          this.localizeStageDetail(event.detail),
+          event.detail,
         );
         break;
       case 'position':
@@ -743,7 +718,7 @@ export class AnalysisChat {
         this.updateTurn(turnId, (message) => ({ ...message, news: event.news }));
         break;
       case 'warning':
-        this.upsertActivity(turnId, `warning-${event.code}`, this.chatWarningLabel(event.code), 'done');
+        this.upsertActivity(turnId, `warning-${event.code}`, this.warningLabel(event.code), 'done');
         break;
       case 'error':
         this.upsertActivity(turnId, 'stream-error', this.copy().analysisFailed, 'failed', event.detail);
@@ -762,10 +737,18 @@ export class AnalysisChat {
     if (controller.signal.aborted || isAbortError(error)) {
       return;
     }
+    const message = this.errorMessage(error);
+    const turnId =
+      this.activeTurnId ?? (action.kind === 'analysis' ? action.turnId : null);
+    this.setFailedActivity(
+      turnId,
+      action.kind === 'analysis' ? 'Analysis failed' : 'Assistant request failed',
+      message,
+    );
     if (error instanceof HttpErrorResponse && error.status === 422) {
-      this.addAssistantMessage(this.errorMessage(error, this.detectedLanguage()));
+      this.addAssistantMessage(message);
     }
-    this.error.set(this.errorMessage(error, this.detectedLanguage()));
+    this.error.set(message);
     this.retryable.set(this.canRetryAfter(error) ? action : null);
   }
 
@@ -776,54 +759,12 @@ export class AnalysisChat {
     return true;
   }
 
-  protected chatWarningLabel(code: string): string {
-    if (!this.isRussian()) {
-      return this.warningLabel(code);
-    }
-    return RUSSIAN_WARNINGS[code] ?? code;
-  }
-
-  private localizeStageLabel(label: string): string {
-    if (!this.isRussian()) {
-      return label;
-    }
-    const mapped = RUSSIAN_STAGE_LABELS[label];
-    if (mapped) {
-      return mapped;
-    }
-    for (const [pattern, template] of RUSSIAN_STAGE_PATTERNS) {
-      const match = pattern.exec(label);
-      if (match) {
-        return template.replace('$1', match[1] ?? '').replace('$2', match[2] ?? '');
-      }
-    }
-    return label;
-  }
-
-  private localizeStageDetail(detail?: string): string | undefined {
-    if (!detail || !this.isRussian()) {
-      return detail;
-    }
-    return this.localizeStageLabel(detail);
-  }
-
   private retryMessage(label: string, delay: number, attempt: number): string {
     const attemptText = `${attempt + 2}/${RETRY_DELAYS_MS.length + 1}`;
     const retry = label.toLowerCase().includes('chat')
       ? this.copy().retryChat
       : this.copy().retryAnalysis;
     return retry(delay, attemptText);
-  }
-
-  private localizeGreeting(): void {
-    const greeting = this.isRussian() ? RUSSIAN_GREETING : ENGLISH_GREETING;
-    this.messages.update((messages) =>
-      messages.map((message) =>
-        message.id === 0 && message.role === 'assistant'
-          ? { ...message, text: greeting }
-          : message,
-      ),
-    );
   }
 
   private addUserMessage(text: string, activities?: ChatActivity[]): number {
@@ -835,10 +776,15 @@ export class AnalysisChat {
     return id;
   }
 
-  private addAssistantMessage(text: string): number {
+  private addAssistantMessage(text: string, analysis?: AnalysisResult): number {
     const id = this.nextMessageId++;
-    this.messages.update((messages) => [...messages, { id, role: 'assistant', text }]);
-    this.pushHistory({ role: 'assistant', text });
+    this.messages.update((messages) => [
+      ...messages,
+      { id, role: 'assistant', text, analysis },
+    ]);
+    if (text) {
+      this.pushHistory({ role: 'assistant', text });
+    }
     return id;
   }
 
@@ -851,13 +797,11 @@ export class AnalysisChat {
 
   private performSwitch(symbol: string): void {
     this.switchProposal.set(null);
-    if (symbol === this.symbol()) {
-      this.mode.set('explore');
-      this.addAssistantMessage(this.copy().alreadyShowing(symbol));
-      return;
+    this.pendingDraftAfterSwitch.set(null);
+    if (symbol !== this.symbol()) {
+      this.preferences.setSymbol(symbol);
     }
-    this.preferences.setSymbol(symbol);
-    this.mode.set(this.pendingDraftAfterSwitch() ? 'draft' : 'explore');
+    this.mode.set('explore');
   }
 
   private emptySnapshot(): ChatMarketSnapshot {

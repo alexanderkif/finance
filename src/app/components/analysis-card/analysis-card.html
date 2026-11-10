@@ -3,7 +3,9 @@
     <h3>{{ result().header }}</h3>
     <span class="intent-badge">{{ result().intent }}</span>
   </header>
-  <p class="analysis-summary">{{ result().recommendation }}</p>
+  @if (result().recommendation) {
+    <p class="analysis-summary">{{ result().recommendation }}</p>
+  }
 
   <dl class="metric-grid">
     <div>

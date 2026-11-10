@@ -50,12 +50,11 @@
               </button>
             }
           </div>
+          @if (message.text) {
+            <p>{{ message.text }}</p>
+          }
           @if (message.analysis; as result) {
             <app-analysis-card [result]="result" />
-          } @else {
-            @if (message.text) {
-              <p>{{ message.text }}</p>
-            }
           }
           @if (message.position; as position) {
             <div class="position-summary" role="status">
@@ -200,7 +199,7 @@
       @if (draftWarnings().length) {
         <ul class="draft-warnings" aria-label="Draft data warnings">
           @for (warning of draftWarnings(); track warning) {
-            <li>{{ chatWarningLabel(warning) }}</li>
+            <li>{{ warningLabel(warning) }}</li>
           }
         </ul>
       }

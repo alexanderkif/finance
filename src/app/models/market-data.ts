@@ -202,6 +202,34 @@ export interface ChatConfirm {
   position: AnalysisPosition;
 }
 
+export interface ChatStep {
+  id: string;
+  label: string;
+  status: 'running' | 'done' | 'failed';
+  detail: string | null;
+}
+
+export type ChartToggleKey = 'sma20' | 'sma50' | 'rsi' | 'levels';
+
+export interface ChatChartToggles {
+  sma20: boolean;
+  sma50: boolean;
+  rsi: boolean;
+  levels: boolean;
+}
+
+export interface ChatUiState {
+  theme: 'light' | 'dark';
+  symbol: string;
+  range: ChartRange;
+  chart_toggles: ChatChartToggles;
+}
+
+export type ChatUiAction =
+  | { type: 'chart_toggle'; key: ChartToggleKey; value: boolean }
+  | { type: 'theme'; value: 'light' | 'dark' }
+  | { type: 'chart_range'; value: ChartRange };
+
 export interface ChatHistoryTurn {
   role: 'user' | 'assistant';
   text: string;
@@ -240,6 +268,7 @@ export interface ChatTurnRequest {
   context: AnalysisPosition[];
   continuation: boolean;
   market: ChatMarketSnapshot;
+  ui?: ChatUiState;
 }
 
 export interface ChatTurnResponse {
@@ -253,6 +282,9 @@ export interface ChatTurnResponse {
   confirm: ChatConfirm | null;
   switch: ChatSwitch | null;
   pending_draft: ChatDraft | null;
+  card?: AnalysisResult | null;
+  steps?: ChatStep[];
+  ui_actions?: ChatUiAction[];
   as_of: string | null;
   degraded: boolean;
   warnings: string[];

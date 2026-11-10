@@ -88,63 +88,18 @@ const analysisStub: AnalysisResult = {
 describe('App', () => {
   const marketApiStub = {
     chatTurn: async (request: ChatTurnRequest): Promise<ChatTurnResponse> => ({
-      mode: 'confirm',
-      text: `AAPL is near 770.00. I can use Bull Put Spread ${request.symbol} 760/755 2030-11-15.`,
+      mode: 'answer',
+      text: `Here is the example analysis for ${request.symbol}.`,
       language: 'English',
       intent: 'open',
-      draft: {
-        position_type: 'strategy',
-        legs: [
-          {
-            symbol: request.symbol,
-            side: 'sell',
-            option_type: 'put',
-            strike: 760,
-            expiration: '2030-11-15',
-          },
-          {
-            symbol: request.symbol,
-            side: 'buy',
-            option_type: 'put',
-            strike: 755,
-            expiration: '2030-11-15',
-          },
-        ],
-        strategy_key: 'bull_put_spread',
-        reference: null,
-      },
+      draft: null,
       missing: [],
-      suggestions: {
-        fields: ['expiration', 'long_strike', 'strike'],
-        expiration: '2030-11-15',
-        strike: 760,
-        long_strike: 755,
-        width: 2,
-      },
-      confirm: {
-        summary: `Bull Put Spread ${request.symbol} 760/755 2030-11-15`,
-        position: {
-          position_type: 'strategy',
-          legs: [
-            {
-              symbol: request.symbol,
-              side: 'sell',
-              option_type: 'put',
-              strike: 760,
-              expiration: '2030-11-15',
-            },
-            {
-              symbol: request.symbol,
-              side: 'buy',
-              option_type: 'put',
-              strike: 755,
-              expiration: '2030-11-15',
-            },
-          ],
-        },
-      },
+      suggestions: null,
+      confirm: null,
       switch: null,
       pending_draft: null,
+      card: null,
+      steps: [],
       as_of: '2030-10-06T15:48:15Z',
       degraded: false,
       warnings: [],
@@ -309,10 +264,9 @@ describe('App', () => {
     expect(userMessage.textContent).toContain('2030-11-15');
     expect(userMessage.textContent).not.toContain('732');
     expect(compiled.querySelector<HTMLTextAreaElement>('.chat-form textarea')?.value).toBe('');
-    expect(compiled.querySelector('.draft-card')?.textContent).toContain(
-      'Bull Put Spread AAPL 760/755 2030-11-15',
+    expect(compiled.querySelector('.draft-card')).toBeNull();
+    expect(compiled.querySelector('.chat-log')?.textContent).toContain(
+      'Here is the example analysis for AAPL.',
     );
-    expect(compiled.querySelector('.analysis-card')).toBeNull();
-    expect(compiled.querySelector('.chat-log')?.textContent).not.toContain('caps the loss');
   });
 });
