@@ -169,6 +169,33 @@ describe('AnalysisChat', () => {
     );
   });
 
+  it('shows a thinking step before the chat response arrives', async () => {
+    const { fixture, compiled, chatTurn } = await setup();
+    let resolveChat!: (value: ChatTurnResponse) => void;
+    chatTurn.mockImplementation(
+      () =>
+        new Promise<ChatTurnResponse>((resolve) => {
+          resolveChat = resolve;
+        }),
+    );
+
+    typeMessage(compiled, 'what is the trend?');
+    submit(fixture, compiled);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    fixture.detectChanges();
+
+    expect(compiled.querySelector('.chat-thinking')).toBeNull();
+    expect(compiled.querySelector('.activity-running')?.textContent).toContain(
+      'Thinking...',
+    );
+    expect(compiled.querySelector('.chat-log .activity-running')).not.toBeNull();
+
+    resolveChat(answerResponse);
+    await settle(fixture);
+
+    expect(compiled.querySelector('.activity-running')).toBeNull();
+  });
+
   it('renders model text with an analysis card and tool steps', async () => {
     const { fixture, compiled, chatTurn } = await setup();
     chatTurn.mockResolvedValue({

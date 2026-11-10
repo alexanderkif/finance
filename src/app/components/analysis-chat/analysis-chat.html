@@ -27,7 +27,7 @@
       [style.maxHeight.px]="chatHeight()"
       (scroll)="onScroll($event)"
     >
-      @for (message of messages(); track $index) {
+      @for (message of messages(); track message.id) {
         <article class="message" [class.message-user]="message.role === 'user'">
           <div class="message-head">
             <span class="message-role">
@@ -67,25 +67,6 @@
               </ul>
             </div>
           }
-          @if (message.activities?.length) {
-            <ol class="activity-timeline" aria-label="Analysis progress">
-              @for (activity of message.activities; track activity.id) {
-                <li
-                  class="activity"
-                  [class.activity-running]="activity.state === 'running'"
-                  [class.activity-done]="activity.state === 'done'"
-                  [class.activity-failed]="activity.state === 'failed'"
-                >
-                  <span class="activity-marker" aria-hidden="true"></span>
-                  <span class="activity-label">{{ activity.label }}</span>
-                  <span class="visually-hidden">{{ activity.state }}</span>
-                  @if (activity.detail) {
-                    <span class="activity-detail">{{ activity.detail }}</span>
-                  }
-                </li>
-              }
-            </ol>
-          }
           @if (message.news?.length) {
             <div class="news-context">
               <span class="news-caption">{{ copy().newsCaption }}</span>
@@ -104,6 +85,25 @@
             </div>
           }
         </article>
+      }
+      @if (currentActivities().length) {
+        <ol class="activity-timeline" aria-label="Analysis progress">
+          @for (activity of currentActivities(); track activity.id) {
+            <li
+              class="activity"
+              [class.activity-running]="activity.state === 'running'"
+              [class.activity-done]="activity.state === 'done'"
+              [class.activity-failed]="activity.state === 'failed'"
+            >
+              <span class="activity-marker" aria-hidden="true"></span>
+              <span class="activity-label">{{ activity.label }}</span>
+              <span class="visually-hidden">{{ activity.state }}</span>
+              @if (activity.detail) {
+                <span class="activity-detail">{{ activity.detail }}</span>
+              }
+            </li>
+          }
+        </ol>
       }
     </div>
 
@@ -271,7 +271,6 @@
     </label>
     <div class="chat-actions">
       @if (busy()) {
-        <span class="chat-thinking" role="status">{{ copy().thinking }}</span>
         <button type="button" class="button button-quiet" (click)="cancel()">Cancel</button>
       }
       <button

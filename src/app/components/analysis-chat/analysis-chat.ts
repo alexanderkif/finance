@@ -62,7 +62,6 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   text?: string;
   analysis?: AnalysisResult;
-  activities?: ChatActivity[];
   position?: PositionSummary;
   news?: NewsHeadline[];
 }
@@ -129,6 +128,10 @@ export class AnalysisChat {
   protected readonly messages = signal<ChatMessage[]>([
     { id: 0, role: 'assistant', text: ENGLISH_GREETING },
   ]);
+  protected readonly activitiesByTurn = signal<Record<number, ChatActivity[]>>(
+    {},
+  );
+  protected readonly currentActivities = signal<ChatActivity[]>([]);
   protected readonly draftText = signal('');
   protected readonly busy = signal(false);
   protected readonly exampleBusy = signal(false);
@@ -192,6 +195,7 @@ export class AnalysisChat {
       mixedReadWrite: () => {
         this.messages();
         this.busy();
+        this.currentActivities();
         this.chatHeight();
         if (this.scrollPinned()) {
           this.scrollToLatest();
@@ -501,11 +505,11 @@ export class AnalysisChat {
     const continuation = options.continuation ?? false;
     const recordUser = options.recordUser ?? true;
     const turnId = recordUser ? this.addUserMessage(text) : this.nextMessageId++;
+    const controller = this.startChatRequest();
     this.setThinkingActivity(turnId);
     this.busy.set(true);
     this.error.set(null);
     this.retryable.set(null);
-    const controller = this.startChatRequest();
     this.activeTurnId = turnId;
     try {
       const response = await this.withRetry(
@@ -606,20 +610,13 @@ export class AnalysisChat {
   }
 
   private setTurnActivities(turnId: number, steps: ChatStep[]): void {
-    this.messages.update((messages) =>
-      messages.map((message) =>
-        message.id === turnId
-          ? {
-              ...message,
-              activities: steps.map((step) => ({
-                id: step.id,
-                label: step.label,
-                state: step.status,
-                detail: step.detail ?? undefined,
-              })),
-            }
-          : message,
-      ),
+    this.currentActivities.set(
+      steps.map((step) => ({
+        id: step.id,
+        label: step.label,
+        state: step.status,
+        detail: step.detail ?? undefined,
+      })),
     );
   }
 
@@ -767,12 +764,9 @@ export class AnalysisChat {
     return retry(delay, attemptText);
   }
 
-  private addUserMessage(text: string, activities?: ChatActivity[]): number {
+  private addUserMessage(text: string): number {
     const id = this.nextMessageId++;
-    this.messages.update((messages) => [
-      ...messages,
-      { id, role: 'user', text, activities: activities ?? [] },
-    ]);
+    this.messages.update((messages) => [...messages, { id, role: 'user', text }]);
     return id;
   }
 
@@ -917,8 +911,8 @@ export class AnalysisChat {
     state: ActivityState,
     detail?: string,
   ): void {
-    this.updateTurn(turnId, (message) => {
-      const activities = [...(message.activities ?? [])];
+    this.activitiesByTurn.update((current) => {
+      const activities = [...(current[turnId] ?? [])];
       const index = activities.findIndex((activity) => activity.id === id);
       const activity: ChatActivity = { id, label, state, detail };
       if (index >= 0) {
@@ -926,7 +920,7 @@ export class AnalysisChat {
       } else {
         activities.push(activity);
       }
-      return { ...message, activities };
+      return { ...current, [turnId]: activities };
     });
   }
 
@@ -936,36 +930,56 @@ export class AnalysisChat {
   }
 
   private completeRunningActivities(turnId: number): void {
-    this.updateTurn(turnId, (message) => ({
-      ...message,
-      activities: message.activities?.map((activity) =>
-        activity.state === 'running' ? { ...activity, state: 'done' } : activity,
-      ),
-    }));
+    this.activitiesByTurn.update((current) => {
+      const activities = current[turnId];
+      if (!activities) {
+        return current;
+      }
+      return {
+        ...current,
+        [turnId]: activities.map((activity) =>
+          activity.state === 'running'
+            ? { ...activity, state: 'done' }
+            : activity,
+        ),
+      };
+    });
   }
 
   private markRunningActivitiesFailed(turnId: number): void {
-    this.updateTurn(turnId, (message) => ({
-      ...message,
-      activities: message.activities?.map((activity) =>
-        activity.state === 'running'
-          ? { ...activity, state: 'failed', detail: activity.detail ?? 'Failed' }
-          : activity,
-      ),
-    }));
+    this.activitiesByTurn.update((current) => {
+      const activities = current[turnId];
+      if (!activities) {
+        return current;
+      }
+      return {
+        ...current,
+        [turnId]: activities.map((activity) =>
+          activity.state === 'running'
+            ? {
+                ...activity,
+                state: 'failed',
+                detail: activity.detail ?? 'Failed',
+              }
+            : activity,
+        ),
+      };
+    });
   }
 
   private cancelRunningActivities(): void {
-    this.messages.update((messages) =>
-      messages.map((message) => {
-        if (!message.activities?.some((activity) => activity.state === 'running')) {
-          return message;
+    this.currentActivities.set([]);
+    this.activitiesByTurn.update((current) => {
+      const next: Record<number, ChatActivity[]> = {};
+      for (const [key, activities] of Object.entries(current)) {
+        const remaining = activities.filter(
+          (activity) => activity.state !== 'running',
+        );
+        if (remaining.length > 0) {
+          next[Number(key)] = remaining;
         }
-        return {
-          ...message,
-          activities: message.activities.filter((activity) => activity.state !== 'running'),
-        };
-      }),
-    );
+      }
+      return next;
+    });
   }
 }
