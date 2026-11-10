@@ -11,7 +11,9 @@ or written approval before any commercial launch.
 | Options chain, underlying quote, VIX | CBOE delayed       | none                  | Delayed 15 minutes                  |
 | XSP/VIX daily candles                | CBOE index history | none                  | EOD, OHLC, no volume                |
 | Other daily candles                  | Twelve Data Basic  | `TWELVE_DATA_API_KEY` | 8 requests/min, 800/day             |
+| Dividend dates and amounts           | Twelve Data Basic  | `TWELVE_DATA_API_KEY` | `/dividends`, recent events         |
 | News headlines                       | Finnhub free       | `FINNHUB_API_KEY`     | Company news, general-news fallback |
+| Earnings calendar                    | Finnhub free       | `FINNHUB_API_KEY`     | `/calendar/earnings`                |
 
 - Read provider keys only in the server process. Use `.env.local` for local
   development and deployment environment settings in production.
@@ -91,6 +93,19 @@ unavailable, report `vix: null` with a warning.
   for symbols without a CBOE history fallback; do not silently substitute a
   different instrument.
 
+## Twelve Data dividends
+
+- Endpoint: `https://api.twelvedata.com/dividends`.
+- Parameters: `symbol`, `outputsize`, `format=JSON`.
+- Authenticate with the `Authorization: apikey <key>` header; never put the key
+  in the URL.
+- Normalize dividends as `{ex_date, amount}` and return recent events.
+- Cache dividends for 300 seconds per symbol.
+- Verified on 2026-11-10: `AAPL` returned HTTP 200 with
+  `{"ex_date": "2026-08-10", "amount": 0.27}`.
+- If the provider is unavailable, return an empty list with a warning. Do not
+  infer dividend dates from headlines.
+
 ## Finnhub news
 
 - Company news endpoint:
@@ -112,13 +127,30 @@ unavailable, report `vix: null` with a warning.
   calendar. Structured calendars require separate verified endpoints and must
   not be inferred from headlines.
 
+## Finnhub earnings
+
+- Endpoint: `https://finnhub.io/api/v1/calendar/earnings`.
+- Parameters: `symbol`, `from`, `to`.
+- Authenticate with the `X-Finnhub-Token` header; never put the key in the URL.
+- Read `earningsCalendar[]`; normalize `date`, `quarter`, `year`,
+  `epsEstimate`, `epsActual`, `revenueEstimate`, and `revenueActual`.
+- Cache earnings for 300 seconds per symbol.
+- Verified on 2026-11-10: `AAPL` returned HTTP 200 with an `earningsCalendar`
+  entry.
+- If the provider is unavailable, return an empty list with a warning. Do not
+  infer earnings dates from headlines. Finnhub dividend endpoints return HTTP
+  403 on the current free tier, so dividends come from Twelve Data instead.
+
 ## Chat market snapshot
 
 - The chat may receive the dashboard's already-loaded market and chart values
   as a client-provided snapshot. Validate and size-limit it; treat it as
   untrusted conversational context.
+- The chat also receives `ui`: theme, selected symbol, chart range, and chart
+  toggles. It is client state, not market data. The model may return
+  `ui_actions`; the client applies them to `Preferences`.
 - The snapshot is not a market-data provider and must never feed the
-  deterministic analysis metrics. A confirmed analysis always re-fetches the
+  deterministic analysis metrics. `compute_position` always re-fetches the
   chain, quote, candles, and news from the providers.
 - Supported snapshot fields are price, change percent, VIX, up to three support
   and three resistance levels, recent candles, SMA 20/50 points, RSI 14 points,

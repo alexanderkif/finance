@@ -26,40 +26,44 @@ api/
 ├── core/
 │   ├── cboe_provider.py
 │   ├── cboe_history_provider.py  # XSP/VIX daily OHLC history
-│   ├── twelvedata_provider.py
-│   ├── finnhub_provider.py
-│   ├── indicators.py        # deterministic SMA/RSI and pivot levels
-│   ├── metrics.py           # deterministic calculations only
-│   └── playbooks/           # JSON playbook definitions
+│   ├── twelvedata_provider.py    # candles and dividends
+│   ├── finnhub_provider.py       # news and earnings
+│   ├── chat_models.py            # chat request/response and UI state
+│   ├── chat_text.py              # English service and control text
+│   ├── indicators.py             # deterministic SMA/RSI and pivot levels
+│   ├── metrics.py                # deterministic calculations only
+│   └── playbooks/                # JSON playbook definitions
 ├── agent/
+│   ├── chat.py                   # tool-calling chat loop
+│   ├── tools.py                  # tool declarations and executors
 │   ├── graph.py
 │   └── prompts.py
-└── tests/                   # unittest suite; `api/` is the import root
+└── tests/                        # unittest suite; `api/` is the import root
 ```
 
-The conversational flow adds `routers/chat.py` for `POST /api/chat/turn`,
-`agent/chat.py` for the structured router and answer prompt,
-`core/chat_i18n.py` for English/Russian deterministic chat text,
-`core/market_digest.py` for deterministic trend/level/volatility facts, and
-`core/patterns.py` for candlestick-pattern detection. The Angular chat copy
-catalog is `src/app/components/analysis-chat/chat-copy.ts`.
+The conversational flow uses `routers/chat.py` for `POST /api/chat/turn`,
+`agent/chat.py` for the Gemini tool loop, `agent/tools.py` for the bounded data
+and metric tools, `core/chat_models.py` for the request/response and UI-state
+schemas, and `core/chat_text.py` for English service and control text. The
+Angular chat renders model text, tool steps, the analysis card, and UI actions.
 
 Keep HTTP routing, provider access, deterministic metrics, and LLM orchestration
 in their respective modules. Providers are isolated behind adapters so the
 free-tier sources can be replaced without changing response contracts.
 
-Use `gemini-3.5-flash-lite` for both model calls per analysis: extraction and
-synthesis. Prefer a direct Gemini structured-output call; adopt
-LangChain/LangGraph only if the analysis flow grows beyond one deterministic
-pipeline, and record that decision. The current implementation calls Gemini
-directly over HTTP and runs the pipeline in `api/agent/graph.py`.
+Use `gemini-3.5-flash-lite` for the chat tool loop and for standalone
+extraction/synthesis calls. Prefer direct Gemini function calling; adopt
+LangChain/LangGraph only if the flow outgrows the deterministic tool loop, and
+record that decision. The current implementation calls Gemini directly over
+HTTP.
 
 ## Provider configuration
 
-- `GEMINI_API_KEY` enables extraction and synthesis.
-- `TWELVE_DATA_API_KEY` enables daily candles for non-index symbols.
+- `GEMINI_API_KEY` enables the chat tool loop, extraction, and synthesis.
+- `TWELVE_DATA_API_KEY` enables daily candles for non-index symbols and dividend
+  dates.
 - CBOE index history provides XSP and VIX daily OHLC without a key.
-- `FINNHUB_API_KEY` enables news headlines.
+- `FINNHUB_API_KEY` enables news headlines and the earnings calendar.
 - CBOE delayed endpoints require no key.
 - Read keys only in the server process. Load them from the repository-root
   `.env.local` for local development and from deployment environment settings
@@ -77,14 +81,16 @@ The legacy dashboard has been replaced. Follow [src/AGENTS.md](src/AGENTS.md).
 - The instrument selector defaults to AAPL and persists the selected symbol in
   `localStorage`. Popular-symbol chips are alphabetical: AAPL, AMZN, DIA,
   GOOGL, IWM, META, MSFT, NVDA, QQQ, SPY, TSLA, XSP.
-- The chat is a scoped financial conversation about the selected instrument,
-  with an option-drafting mode. It sends the already-loaded market and chart
-  snapshot to `POST /api/chat/turn`, keeps the transcript, draft, and previous
-  positions on the client, and returns to the conversation after every analysis
-  card.
-- Explicit switch commands switch the selected symbol immediately; exploratory
-  questions ask for confirmation. An option request for another symbol carries
-  a pending draft across the switch.
+- The chat is model-led. It sends the market snapshot, history, previous
+  positions, and current UI state to `POST /api/chat/turn`. The response contains
+  model-written text, tool `steps`, an optional analysis `card`, and
+  `ui_actions`. The client shows a `Thinking...` running step while the turn is
+  in flight, then renders the text and card, replaces it with the returned
+  `done`/`failed` steps, applies UI actions to `Preferences`, and switches the
+  symbol only when `switch.explicit` is true. A failed request becomes a failed
+  `Assistant request failed` step.
+- Exploratory switch questions are answered conversationally; the model asks for
+  confirmation in text instead of rendering a local switch card.
 - Provide light and dark themes with CSS custom properties and `color-scheme`,
   persist the choice, and default to `prefers-color-scheme`. Apply the stored
   theme before hydration to avoid a flash of the wrong theme.
@@ -96,81 +102,65 @@ The legacy dashboard has been replaced. Follow [src/AGENTS.md](src/AGENTS.md).
   chart requirements.
 - Chart, levels, and news data must come from the API. Render explicit
   unavailable states instead of synthetic series or placeholder values.
-- The chat infers the intent (open, close, roll; open by default) from the
-  message and sends it to the analysis endpoint. There is no intent selector.
+- The model infers the intent (open, close, roll; open by default) and passes it
+  to `compute_position`. There is no intent selector.
 - Do not render a chat-turn "interpreting" step. When a request is cancelled or
   replaced, remove its in-progress stages instead of showing a failure. Do not
   add a separate "card added" acknowledgement; the inline card is the answer.
-- The chat streams `POST /api/analysis/run/stream` as NDJSON through `fetch` to
-  show real stage progress, the interpreted position, and recent headlines
-  before the analysis card. `POST /api/analysis/run` remains the JSON endpoint
-  for other clients.
+- The chat does not call `POST /api/analysis/run/stream`; the analysis card comes
+  from the chat tool result. The analysis endpoints remain available for other
+  clients.
 - The client keeps the last three complete positions and sends them as
-  `context` to the chat turn and analysis; no user state is stored server-side.
-  Reference edits are applied against the listed strike ladder before any
-  metric is computed.
+  `context`; no user state is stored server-side. Reference edits are resolved
+  inside `compute_position` against the listed strike ladder.
 
 ## Agent boundary
 
-Chat state contains the mode, the active draft, client-owned history and
-previous positions, the last detected answer language, an optional pending
-switch, and the dashboard market snapshot. The transcript, draft, and context live on the client; the server is
-stateless.
+Chat state is client-owned: transcript, previous positions, dashboard snapshot,
+and current UI state. The server is stateless.
 
-Natural-language routing and extraction use Gemini structured output. Schema
-validation, strategy classification, market-digest construction, candlestick
-pattern detection, and all financial arithmetic remain deterministic. The
-market snapshot is conversational context only; it must never supply a metric
-to the analysis pipeline, which always re-fetches the chain, quote, candles,
-and news from the providers.
+The model is the primary conversational layer. It receives the message, history,
+snapshot, previous positions, and UI state, then calls tools for fresh provider
+data and deterministic calculations. `agent/tools.py` bounds every result:
+quotes, chart summaries, option expirations and chain slices, news, dividends,
+earnings, instrument switching, UI actions, and computed metrics. The model
+writes the final text; it never invents or recalculates a market value.
 
-LLM calls are limited to one structured chat call per turn and one synthesis
-call per confirmed analysis. `POST /api/chat/turn` performs routing, extraction,
-and the grounded market answer in one call. A deterministic refusal makes zero
-calls. A plain "yes" in confirm mode and a plain cancel are handled on the
-client without a chat turn; the confirmed position goes straight to the
-analysis stream. A confirmed analysis then calls `POST /api/analysis/run` or
-its streaming variant, which makes exactly one synthesis call. A single option
-request followed by a plain confirmation therefore makes at most two Gemini
-calls in total. A further edit is a new turn and may add one chat call for that
-edit. `POST /api/analysis/parse` remains available for structured extraction
-clients and internal reuse.
+The tool loop is capped at 20 tool calls and 60 seconds per turn. Each tool call
+is one model step, so a turn can make several Gemini calls. A hard safety block
+makes zero model calls. Tool failures are returned to the model as error
+payloads and appear as failed steps; the model may explain them.
 
-The synthesis prompt receives computed facts and optional ticker headlines as
-context, and must not perform arithmetic or present news as a calendar. The
-chat prompt receives the deterministic digest, recent candles, and headlines;
-it must not calculate new values, invent data, or claim causation. The
-extraction call may receive client-owned previous positions to resolve
-references, but every resulting leg is validated against the real listed chain
-before metrics run.
+`compute_position` runs the deterministic metrics pipeline without a synthesis
+call. The card is the deterministic result; the model writes the explanation.
+Standalone `POST /api/analysis/parse` and `/api/analysis/run` remain available
+for clients that do not use the chat.
 
-Deterministic limits and a scope check run before the model. Off-topic,
-hacking, credential-probing, personal-use, oversized, abusive, and
-prompt-injection input is refused without an analysis card. When a deterministic
-check passes, the structured router may still return a refusal; it is not the
-only protection.
+Deterministic limits and a hard safety check run before the model. Prompt
+injection, abuse, hacking, credential probing, personal use, oversized input,
+invalid symbols, and more than two legs are refused deterministically. Off-topic
+and unsupported-strategy requests are soft refusals written by the model.
 
 ## Guardrails
 
-`api/core/guardrails.py` runs synchronously before the chat router or
-extraction. It enforces the message size and symbol format, a deterministic
-two-leg limit, and refuses off-topic, nonsensical, abusive, creative-generation,
-hacking, credential-probing, prompt-injection, personal-use, and
-unsupported-strategy requests. Refused requests return a short message with no
-analysis fields and never echo secrets or internal instructions. Deterministic
-refusals make no Gemini call. These limits apply to any merged missing-field
-follow-up text and to the chat snapshot validation.
+`api/core/guardrails.py` runs synchronously before the chat tool loop. It
+enforces the message size and symbol format, a deterministic two-leg limit, and
+refuses prompt injection, abuse, hacking, credential probing, personal use, and
+unsafe input with English control text. These hard blocks make no Gemini call
+and never echo secrets or internal instructions. Off-topic, nonsensical,
+creative-generation, and unsupported-strategy requests are left to the model as
+soft refusals.
 
 ## Current implementation
 
-The Yahoo Finance endpoints and the "Yahoo Finance API" title have been removed.
-The API is now `Options Strategy Assistant API` and exposes market, chart,
-options, chat, parse, and analysis routes. The Phase 11 conversational chat
-contract (`POST /api/chat/turn`) is documented in [API_SPEC.md](API_SPEC.md)
-and implemented by `routers/chat.py`, `agent/chat.py`, and the deterministic
-helpers in `core/`. CBOE 429/5xx responses now serve a cache
-less than ten minutes old or an explicit degraded response, and unavailable
-news or candle providers do not block options analysis. Phase 4 frontend
-verification is still pending a real-browser pass; the integrated `vercel dev`
-routes, CBOE quote/VIX, and the Twelve Data chart endpoint have been verified
-with the Twelve Data demo key.
+The API is `Options Strategy Assistant API` and exposes market, chart, options,
+chat, parse, and analysis routes. `POST /api/chat/turn` is a Gemini tool loop:
+`agent/chat.py` runs the loop and `agent/tools.py` executes bounded provider and
+metric tools. Deterministic metrics live in `core/metrics.py`. Twelve Data
+supplies dividends and Finnhub supplies earnings. CBOE 429/5xx responses serve a
+cache less than ten minutes old or an explicit degraded response, and unavailable
+news or candle providers do not block options analysis.
+
+In production, per-IP rate limits protect the API and Swagger/ReDoc/OpenAPI are
+disabled. Locally, the docs remain available and rate limiting is off unless
+`RATE_LIMIT_ENABLED=1` is set.

@@ -213,10 +213,11 @@ Decisions for this phase:
   pending draft.
 - Draft suggestions use the nearest 21-60 day expiration, a near-money strike,
   and a default width of two listed strike steps.
-- One Gemini call per chat turn; a confirmed analysis adds exactly one
-  synthesis call. A plain "yes" in confirm mode and a plain cancel are handled
-  on the client without a chat turn, so an option request plus confirmation
-  stays at two Gemini calls.
+- One Gemini routing/extraction call per chat turn; a non-English confirm or
+  draft adds one short text-localization call. A confirmed analysis adds exactly
+  one synthesis call. A plain "yes" in confirm mode and a plain cancel are
+  handled on the client without a chat turn, so an English option request plus
+  confirmation stays at two Gemini calls and a non-English one at three.
 - The dashboard market snapshot is client-provided conversational context and
   never supplies an analysis metric.
 
@@ -247,6 +248,30 @@ question, and a return to the chat after the card. Tests prove a chat turn makes
 at most one Gemini call, a deterministic refusal makes zero, a confirmed
 analysis adds exactly one synthesis call, refused requests expose no secrets,
 and the snapshot never supplies an analysis metric.
+
+## Phase 12 — Model-led tool-calling chat
+
+- Replace the deterministic draft/confirm flow with a Gemini tool loop.
+- Add bounded tools for quote, chart, option chain, news, dividends, earnings,
+  instrument switching, UI state, and deterministic metrics.
+- Let the model write all conversational text; keep deterministic English only
+  for service errors, hard safety blocks, validation, warnings, and progress
+  labels.
+- Add UI state read/write: chart toggles, theme, and chart range, persisted
+  through `Preferences`.
+- Add Twelve Data dividends and Finnhub earnings.
+- Limit the loop to 20 tool calls and 60 seconds; add production per-IP rate
+  limiting and disable Swagger/ReDoc/OpenAPI in production.
+- Update [PRD.md](PRD.md), [API_SPEC.md](API_SPEC.md),
+  [ARCHITECTURE.md](ARCHITECTURE.md), [DATA_CONTRACT.md](DATA_CONTRACT.md),
+  [README.md](README.md), and [src/AGENTS.md](src/AGENTS.md).
+
+**GATE 12:** backend and frontend tests pass, Ruff and Pyright pass, and the
+production build succeeds. The chat returns model text plus tool steps, shows a
+`Thinking...` running step before the final `done`/`failed` steps, returns tool
+failures as failed steps with English detail instead of HTTP 500, renders an
+analysis card from `compute_position`, applies UI actions, and switches
+instruments only on an explicit switch response.
 
 ## Phase completion
 

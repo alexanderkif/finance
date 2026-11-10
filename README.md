@@ -11,9 +11,9 @@ delayed options/quote/VIX, CBOE index history for XSP/VIX candles, Twelve Data
 Basic candles for other symbols, and Finnhub free news. A commercial launch
 requires licensed plans or replacement providers.
 
-## Локальный запуск
+## Local development
 
-Установите зависимости и создайте `.env.local` в корне репозитория:
+Install the dependencies and create `.env.local` in the repository root:
 
 ```powershell
 uv sync --project api
@@ -25,19 +25,19 @@ TWELVE_DATA_API_KEY=...
 FINNHUB_API_KEY=...
 ```
 
-Запустите всё приложение из корня репозитория:
+Run the whole application from the repository root:
 
 ```powershell
 vercel dev
 ```
 
-Откройте **http://localhost:3000/**. Именно `vercel dev` поднимает оба сервиса
-и применяет правила маршрутизации из `vercel.json`.
+Open **http://localhost:3000/**. `vercel dev` starts both services and applies
+the routing rules from `vercel.json`.
 
-Без `TWELVE_DATA_API_KEY` график показывает явное состояние недоступности, без
-`FINNHUB_API_KEY` — пустой список новостей. Ключи не попадают в браузер.
+Without `TWELVE_DATA_API_KEY`, the chart shows an explicit unavailable state;
+without `FINNHUB_API_KEY`, the news list is empty. Keys never reach the browser.
 
-Примеры API:
+API examples:
 
 ```text
 http://localhost:3000/api/market/SPY
@@ -51,46 +51,47 @@ http://localhost:3000/api/docs
 ```
 
 Swagger UI: `/api/docs`, ReDoc: `/api/redoc`, OpenAPI: `/api/openapi.json`.
+These are available locally and disabled in production.
 
-Если команда `vercel` ещё не установлена:
+If the `vercel` command is not installed yet:
 
 ```powershell
 npm install -g vercel
 ```
 
-Репозиторий должен быть связан с Vercel-проектом командой `vercel link`;
-каталог проекта — корень этого репозитория, не `api`.
+The repository must be linked to the Vercel project with `vercel link`; the
+project directory is the repository root, not `api`.
 
-`npm start` / `ng serve` запускает только Angular CLI dev server на порту 4200.
-Он не использует Vercel rewrites и не маршрутизирует `/api` в FastAPI. Для
-проверки полной интеграции используйте `vercel dev` и порт 3000.
+`npm start` / `ng serve` starts only the Angular CLI dev server on port 4200. It
+does not use the Vercel rewrites and does not route `/api` to FastAPI. Use
+`vercel dev` on port 3000 to verify the full integration.
 
-## Деплой на Vercel
+## Deploying to Vercel
 
-1. В настройках Vercel-проекта укажите корень репозитория как Root Directory.
-2. Оставьте `vercel.json` в корне: `web` собирает Angular, `api` — FastAPI;
-   rewrites направляют `/api/*` в API, остальные пути — в Angular.
-3. Добавьте `GEMINI_API_KEY`, `TWELVE_DATA_API_KEY` и `FINNHUB_API_KEY` в
-   Environment Variables проекта.
-4. Выполните `vercel link`, если репозиторий ещё не связан, затем:
+1. In the Vercel project settings, set the repository root as the Root Directory.
+2. Keep `vercel.json` at the root: `web` builds Angular and `api` builds FastAPI;
+   the rewrites send `/api/*` to the API and all other paths to Angular.
+3. Add `GEMINI_API_KEY`, `TWELVE_DATA_API_KEY`, and `FINNHUB_API_KEY` to the
+   project's Environment Variables.
+4. Run `vercel link` if the repository is not linked yet, then:
 
    ```powershell
    vercel --prod
    ```
 
-Конфигурация использует Vercel Services (Beta). В `api/.python-version`
-зафиксирована версия Python; зависимости сервиса описаны в `api/pyproject.toml`
-и `api/uv.lock`. Для собственного домена добавьте его hostname в
-`security.allowedHosts` в `angular.json`; локальные адреса и домены
-`*.vercel.app` уже разрешены.
+The configuration uses Vercel Services (Beta). `api/.python-version` pins the
+Python version; the service dependencies are declared in `api/pyproject.toml`
+and `api/uv.lock`. For a custom domain, add its hostname to
+`security.allowedHosts` in `angular.json`; local addresses and `*.vercel.app`
+domains are already allowed.
 
-## Проверки
+## Checks
 
 ```powershell
 # backend tests
 api\.venv\Scripts\python.exe -m unittest discover -s api\tests -t api -p "test_*.py"
 
-# backend lint and types (из папки api)
+# backend lint and types (from the api directory)
 uv run ruff check .
 uv run pyright
 
@@ -101,18 +102,18 @@ npm test -- --watch=false
 npm run build
 ```
 
-## MCP для разработки
+## MCP for development
 
-`opencode.json` в корне подключает MCP-серверы `angular-cli`, `APIs.io` и
-`finance-api`. opencode не читает `.mcp.json` и `.vscode/mcp.json` — это
-конфигурация Claude Code и VS Code.
+The root `opencode.json` connects the `angular-cli`, `APIs.io`, and `finance-api`
+MCP servers. opencode does not read `.mcp.json` or `.vscode/mcp.json`; those are
+Claude Code and VS Code configuration.
 
-`finance-api` запускает `api/mcp_dev.py`, который вызывает FastAPI-приложение
-напрямую и не требует `vercel dev`. Инструменты: `get_market`, `get_chart`,
+`finance-api` starts `api/mcp_dev.py`, which calls the FastAPI application
+directly and does not require `vercel dev`. Tools: `get_market`, `get_chart`,
 `get_option_chain`, `parse_analysis`, `run_analysis`, `get_analysis_example`.
-Сервер только для разработки и не входит в деплой Vercel; зависимость `mcp`
-объявлена в dev-группе `api/pyproject.toml` и ставится через
-`uv sync --project api`.
+The server is development-only and is not part of the Vercel deployment; the
+`mcp` dependency is declared in the dev group of `api/pyproject.toml` and
+installed with `uv sync --project api`.
 
 ## Dashboard
 
@@ -125,27 +126,19 @@ The dashboard opens on AAPL and is organised top to bottom:
    support/resistance annotations, and user-added trend lines. XSP/VIX candles
    come from CBOE daily history and do not include volume, so the volume pane
    is hidden for those symbols with an explanatory note.
-3. The scoped AI chat. By default it holds a financial conversation about the
-   selected instrument using the already-loaded price, VIX, levels, candles,
-   indicators, and headlines, with answers and helper text in the question's
-   language (English/Russian templates; model answers also cover other
-   languages). It answers trend, candlestick-pattern, key-level, volatility,
-   and news questions without inventing values. An option request opens a
-   guided draft that proposes a live strike and expiration; a plain "yes"
-   accepts, and edits such as "wider by two steps" update it. The chat infers
-   the intent from the message (open by default) and appends a deterministic
-   analysis card inline for every confirmed answer. It streams real analysis
-   stages, shows the interpreted position before the result, and lists recent
-   ticker headlines as context. Follow-ups such as "the same spread, two strikes higher" reuse the
-   client-held previous positions, and the chat returns to the conversation
-   after every card. Explicit switch commands change the selected instrument
-   immediately; exploratory questions ask first. Completed analyses show
-   1-sigma and 2-sigma ranges, volatility context, and playbook event
-   sensitivity. `Use example` submits immediately without an intent in the
-   message, and user messages can be copied back into the input for editing.
-   Enter sends, and Shift+Enter inserts a new line. The conversation height can
-   be dragged by its corner grip or adjusted with the keyboard and is
-   remembered between visits.
+3. The scoped AI chat. The model understands the message, calls backend tools
+   for quote, chart, option chain, news, dividends, earnings, and deterministic
+   metrics, and writes the answer in the question's language. It can ask for
+   missing position details, call `compute_position`, and return an analysis
+   card plus an explanation. It can also switch instruments and change chart
+   toggles, theme, and chart range; those changes update the visible controls and
+   persist through `Preferences`. A `Thinking...` step is shown while the turn is
+   in flight; tool steps, including failed ones and their English error detail,
+   appear in the activity timeline.
+   `Use example` submits a live example message, and user messages can be copied
+   back into the input for editing. Enter sends, and Shift+Enter inserts a new
+   line. The conversation height can be dragged by its corner grip or adjusted
+   with the keyboard and is remembered between visits.
 
 The UI supports light and dark themes; the theme and selected instrument are
 persisted in `localStorage`, and the stored theme is applied before hydration.
@@ -161,15 +154,15 @@ Enter, cancel with Escape).
 ## Chat scope and misuse protection
 
 The assistant is a scoped financial conversation about the selected instrument
-and its environment, plus drafting and evaluating a single option or a two-leg
+and its environment, plus tool-driven analysis of a single option or a two-leg
 vertical spread. It is not a general-purpose chatbot, a coding assistant, or a
 personal-use tool. Before any Gemini call, the API applies deterministic
-message-size, leg-count, symbol, and strategy checks and refuses off-topic,
-nonsensical, abusive, creative-generation, hacking, credential-probing,
-prompt-injection, personal-use, and unsupported-strategy requests with a short
-message and no analysis. Deterministic refusals make no Gemini call. System
-instructions, provider keys, and internal prompts stay server-side and are
-never returned.
+message-size, leg-count, symbol, and hard safety checks. Prompt injection,
+abuse, hacking, credential probing, personal use, oversized input, invalid
+symbols, and more than two legs are refused with English control text and no
+model call. Off-topic and unsupported-strategy requests are soft refusals
+written by the model. System instructions, provider keys, and internal prompts
+stay server-side and are never returned.
 
 The service must not be repurposed for unrelated content generation,
 personalized financial advice, trade execution or routing, market manipulation,
@@ -180,10 +173,12 @@ market and options analysis.
 
 - CBOE delayed: options chain, underlying quote, VIX.
 - CBOE index history: XSP and VIX daily OHLC (EOD, no volume).
-- Twelve Data Basic: daily candles for other symbols; free tier allows
-  8 requests/minute and 800/day. XSP/SPX candles require a paid plan, so XSP
-  uses the CBOE history source instead.
-- Finnhub free: company news with a general-market fallback.
+- Twelve Data Basic: daily candles for other symbols and dividend dates; free
+  tier allows 8 requests/minute and 800/day. XSP/SPX candles require a paid
+  plan, so XSP uses the CBOE history source instead.
+- Finnhub free: company news with a general-market fallback and the earnings
+  calendar. Finnhub dividend endpoints return HTTP 403 on the current free
+  tier.
 
 These free tiers are for non-commercial use. Before a commercial launch,
 license CBOE DataShop, Twelve Data, and Finnhub as required, or replace them

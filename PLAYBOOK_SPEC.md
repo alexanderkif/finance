@@ -52,31 +52,13 @@ not met, this rule does not identify a vertical spread.
 Example: sell the higher-strike put and buy the lower-strike put to identify a
 `bull_put_spread`.
 
-## Draft suggestion defaults
+## Contract suggestions
 
-When the chat proposes a complete option draft, use the live listed chain and
-these deterministic rules:
+The chat model chooses strikes and expirations from the listed chain using the
+`get_option_expirations` and `get_option_chain` tools. It must never invent a
+contract. `compute_position` validates every leg against the listed chain before
+the analysis runs.
 
-- Expiration: the listed expiration closest to 40 days, preferring 21-60 days.
-- Long call: the strike closest to the underlying price.
-- Long put: the strike closest to the underlying price.
-- Short call: the first listed strike above the underlying price.
-- Short put: the first listed strike below the underlying price.
-- Bull put spread: the highest listed put strike at or below 99% of the
-  underlying price as the short leg, and the second next listed strike lower as
-  the long leg.
-- Bear call spread: the lowest listed call strike at or above 101% of the
-  underlying price as the short leg, and the second next listed strike higher as
-  the long leg.
-- Bull call spread: the strike closest to the underlying price as the long leg,
-  and the second next listed strike higher as the short leg.
-- Bear put spread: the strike closest to the underlying price as the long leg,
-  and the second next listed strike lower as the short leg.
-
-The default width is two listed strike steps: the long leg is the second next
-listed strike from the short leg. If the ladder has fewer steps, use the widest
-available width and say so. If no listed candidate exists, return the nearest
-listed strikes or ask for an explicit strike; never invent a contract.
-
-Every proposal is an example structure, not a recommendation. The server
-validates every proposed leg against the listed chain before the analysis runs.
+The model may use near-money or default-width heuristics, but they are not a
+deterministic server contract. Every proposal is an example structure, not a
+recommendation.

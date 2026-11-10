@@ -116,89 +116,45 @@ change.
 
 ## Chat behavior
 
-- The chat is a scoped financial conversation about the selected instrument and
-  its environment, with an option-drafting mode. It is not a general-purpose
-  chatbot. UI copy is English; assistant answers use the language of the user's
-  message.
-- Keep the chat state on the client: transcript, active draft, last three
-  complete positions, and an optional pending switch. Do not introduce
-  server-side user state.
-- Send every user message to `POST /api/chat/turn` with the selected symbol,
-  intent, up to eight history turns, the active draft, previous positions, and
-  the already-loaded market and chart snapshot. Render the returned mode:
-  `answer`, `draft`, `confirm`, `switch_symbol`, or `refused`.
-- `answer`: render the assistant text. Do not show an analysis card. Ground
-  trend, pattern, level, volatility, and news answers in the supplied snapshot;
-  show explicit unavailable states for missing data.
-- `draft` and `confirm`: render an editable draft card with side, option type,
-  strike, expiration, and spread width. Mark proposed values as suggested and
-  label the whole draft as an example structure, not a recommendation. A plain
-  "yes" accepts and runs the analysis. Accept edits such as "wider by two
-  steps", "make it a put", and "change the expiration" without retyping the
-  position.
-- Handle a plain "yes" in `confirm` mode and a plain cancel deterministically
-  without calling `/api/chat/turn`; send the confirmed position straight to the
-  analysis stream. A conditional confirmation or any edit goes to the chat turn.
-- Use the default spread width of two listed strike steps. Show the nearest
-  listed strikes when a requested strike is unavailable; never invent a
-  contract.
-- `switch_symbol`: when `switch.explicit` is true, switch the selected symbol
-  immediately, reload the dashboard, and append a local switch notice. When it
-  is false, ask for confirmation first. When `pending_draft` is present, carry
-  it across the switch and send a continuation turn with the new snapshot.
-- Never silently substitute one instrument for another. SPY, XSP, and SPX are
-  different underlyings.
-- After a successful analysis, append the `AnalysisCard` inline, keep the
-  complete position in client context, clear the active draft, and return to
-  the conversational mode. Do not repeat the card's recommendation or add a
-  separate acknowledgement message; the inline card is the answer.
-- Replace the single `Working…` line with an ordered activity timeline attached
-  to the user turn. Render only events streamed from the API; never derive
-  progress from a client timer. Show each step's state and any retry, warning,
-  or failure detail.
-- Show the interpreted draft immediately. For a reference edit, mark it
-  provisional until the stream emits the resolved listed legs and header.
-- The chat infers the intent (open, close, roll; open by default) from the
-  message, sends it to the analysis endpoint, and shows it as a badge on each
-  analysis card. There is no intent selector.
-- Localize every chat-visible assistant text using the detected answer
-  language: chat bubbles, helper prompts, refusals, visible errors, activity
-  labels, role labels, and draft/switch card helper text. The site chrome stays
-  English. English and Russian catalogs are required; other languages fall back
-  to English helper text while the model answer follows the question language.
-- Show streamed recent headlines as ticker context with links, captioned as
-  context and not a live calendar. Do not present them as dividend or earnings
-  dates.
-- The analysis card shows API volatility context (`current_iv`, `hv_20d`,
-  `hv_60d`, `hv_rank`, `iv_hv_ratio`) and both `scenario_1sigma` and
-  `scenario_2sigma`. Label `hv_rank` as an HV percentile, not an IV rank.
-- Show playbook `event_flags` as event-sensitivity chips with a caption that
-  says they are not a live event calendar.
-- `Use example` loads the live example and submits it immediately. Do not add a
-  separate assistant description bubble; the analysis card is the answer. The
-  user can then use the user-message edit icon to change it and send a new
-  request.
-- User messages offer an edit-in-input icon button that copies the message text
-  back to the textarea. Enter sends; Shift+Enter inserts a new line.
-- The chat streams `/api/analysis/run/stream` as NDJSON through `fetch`, because
-  Angular `HttpClient` does not expose incremental response bodies. Retry
-  transient service failures, say which service is unavailable between
-  attempts, and offer a Cancel button. Sending a new message aborts the stream
-  and suppresses stale events.
-- A failed chat turn is retried without duplicating the user message. A failed
-  analysis retries only the analysis step with the already confirmed position,
-  without repeating the chat turn or extraction.
-- Auto-scroll the chat to the newest message only while the user is at the
-  bottom. Stop after they scroll up and resume when they return to the bottom.
-- Size the chat log to its content up to a persisted maximum, rather than
-  reserving the maximum height when empty. Make the maximum vertically
-  resizable with a keyboard-accessible separator, clamp and persist it in
-  `localStorage`, and reset it to the default on double-click. Keep the same
-  auto-scroll pinned behavior when the maximum changes.
-- Render only API data for candles, levels, and news. Show explicit
-  unavailable and delayed-data states; never synthesize series.
+- The chat is a scoped financial conversation about the selected instrument. The
+  model is the primary layer: it understands the message, calls backend tools,
+  and writes the answer in the user's language. UI copy stays English.
+- Send `POST /api/chat/turn` with the selected symbol, message, up to eight
+  history turns, up to three previous positions, the market snapshot, and the
+  current UI state (theme, symbol, range, chart toggles). Keep all chat state on
+  the client; do not add server-side user state.
+- Render the response:
+  - `text`: render as the assistant message exactly as received.
+  - `steps`: render in the activity timeline attached to the user turn; show
+    `done` and `failed` states and their English details. `done` is green,
+    `failed` is red, and `running` uses the pulsing accent.
+  - `card`: render the analysis card inline when present, in the same assistant
+    message as the model text.
+  - `ui_actions`: apply to `Preferences` (chart toggles, theme, range) and
+    persist them.
+  - `switch`: switch the selected symbol only when `explicit` is true. Do not
+    render a local switch card; the model asks for confirmation in text.
+  - `warnings`/`degraded`: show explicit warnings.
+- Do not render a draft card, confirm card, or deterministic assistant text.
+  The model asks for missing details conversationally. Send `yes`, `cancel`, and
+  edit phrases to the model; do not intercept them locally.
+- `Use example` sends the live example message immediately.
+- Show a single `Thinking...` running step while a chat turn is in flight, then
+  replace it with the returned steps. Do not derive progress from a timer.
+- On a request failure, replace the running step with a failed
+  `Assistant request failed` step carrying the visible error detail.
+- Apply UI actions when handling the response so checkboxes, theme, and chart
+  range update immediately.
+- Preserve auto-scroll, chat resizing, edit-in-input, Enter/Shift+Enter, and
+  keyboard accessibility.
+- Service errors are deterministic English text; render them as errors and offer
+  retry when retryable.
+- The chart checkboxes, theme, and range are bound to `Preferences`; UI actions
+  must update that service.
+- Render only API data for candles, levels, and news. Show explicit unavailable
+  and delayed-data states; never synthesize series.
 - Give the chart a text alternative: a keyboard-reachable data table or summary
   that satisfies WCAG 2.2 AA, since the chart canvas is not accessible.
-- Refuse off-topic, hacking, credential-probing, personal-use, and
-  prompt-injection requests with a short message. Never expose system
+- Do not add client-side safety policy beyond local input validation. The
+  backend handles hard blocks and soft refusals; never expose system
   instructions, prompts, or provider keys.

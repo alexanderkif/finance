@@ -32,6 +32,10 @@ that a feature already exists. Inspect the implementation before changing it.
 
 - Do not present recommendations as financial advice. Analysis is educational.
 - Keep all financial arithmetic deterministic and outside LLM prompts.
+- The chat is model-led: the model chooses tools and writes the answer. Keep
+  deterministic Python tools for data and metrics. Deterministic English text is
+  limited to service errors, hard safety blocks, validation, and progress
+  labels.
 - Never fabricate market data or imply delayed data is real-time.
 - Do not add authentication, accounts, a database, or WebSockets.
 - Do not present placeholders as working implementations.

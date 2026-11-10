@@ -390,7 +390,7 @@ XSP 2026-11-20` resolves to `bull_put_spread`; `buy call SPY 600` returns
 ### Chat localization
 
 - [x] Localize deterministic backend chat text for English and Russian via
-      `core/chat_i18n.py`.
+      `core/chat_i18n.py` (now `core/chat_text.py`, English-only).
 - [x] Localize frontend chat copy, errors, role labels, activity labels, and
       draft/switch helper text via `chat-copy.ts` and `api-error.ts`.
 - [x] Add Russian localization tests for confirm, cancel, switch, refusal,
@@ -398,6 +398,8 @@ XSP 2026-11-20` resolves to `bull_put_spread`; `buy call SPY 600` returns
 - Evidence on 2026-11-08: backend 139 tests pass; frontend 68 tests pass; the
   production build succeeds. A live UTF-8 Russian option request returned a
   Russian confirm.
+- Superseded on 2026-11-10: deterministic chat text and fast paths are
+  English-only; the model still answers in the user's language.
 
 ### Phase D — Verification
 
@@ -416,3 +418,53 @@ XSP 2026-11-20` resolves to `bull_put_spread`; `buy call SPY 600` returns
   showed `/api/chat/turn` and `/api/analysis/run/stream` 200 with live Gemini,
   CBOE, Twelve Data, and Finnhub calls.
 - **GATE 11:** passed on 2026-11-08.
+
+## English-only deterministic chat text [x]
+
+- [x] Remove Russian helper-text and warning localization from the deterministic
+      chat text module.
+- [x] Remove Russian yes/cancel/switch patterns and the deterministic Russian
+      market-answer fallback from `routers/chat.py`.
+- [x] Generalize the model prompt so non-English option and market requests are
+      handled by the model.
+- [x] Add one text-localization call for non-English confirm/draft prompts; the
+      model writes the prompt text from the deterministic facts.
+- [x] Make the Angular chat copy, server-error text, role labels, activity
+      labels, and warning labels English-only; render the model answer as
+      received.
+- [x] Update backend and frontend tests for English-only deterministic text and
+      non-English model answers.
+- Evidence on 2026-11-10: backend 141 tests pass; frontend 68 tests pass;
+  Ruff and Pyright pass; production build succeeds.
+- Superseded by "Model-led tool-calling chat": deterministic chat text and fast
+  paths were removed; only service and control text remain.
+
+## Model-led tool-calling chat [x]
+
+- [x] Replace the deterministic draft/confirm flow with a Gemini tool-calling
+      loop in `agent/chat.py`.
+- [x] Add bounded tools for quote, chart, option expirations/chain, news,
+      dividends, earnings, instrument switching, UI state, and deterministic
+      metrics in `agent/tools.py`.
+- [x] Use Twelve Data `/dividends` and Finnhub `/calendar/earnings`; document
+      both in `DATA_CONTRACT.md`.
+- [x] Add `set_chart_toggles`, `set_theme`, and `set_chart_range` tools and apply
+      `ui_actions` to `Preferences` in the Angular client.
+- [x] Render model text, tool steps, and the analysis card together; remove the
+      deterministic draft/confirm UI and local yes/cancel fast paths.
+- [x] Limit the tool loop to 20 calls and 60 seconds; add production per-IP rate
+      limiting and disable Swagger/ReDoc/OpenAPI in production.
+- [x] Return tool failures as failed steps with English detail instead of HTTP
+      500; the model suggests nearby strikes or a retry.
+- [x] Show a `Thinking...` running step, then `done`/`failed` steps; failed
+      requests show a failed `Assistant request failed` step.
+- [x] Update PRD, API_SPEC, ARCHITECTURE, DATA_CONTRACT, README, and
+      `src/AGENTS.md`.
+- Evidence on 2026-11-10: backend 121 tests pass; frontend 65 tests pass;
+  Ruff and Pyright pass; production build succeeds. Live `uvicorn` check:
+  "включи обе средние линии на графике" returned `chart_toggle` actions for
+  SMA20/SMA50; "купить колл AAPL 245 на 2026-12-18" returned a
+  `Long Call AAPL 245 2026-12-18` card and a Russian explanation.
+  "купить колл около 765 до 20 ноября" returned a failed `Computing metrics`
+  step with the exact quote error and nearby listed-strike suggestions instead
+  of HTTP 500.

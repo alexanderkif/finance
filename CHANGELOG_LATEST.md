@@ -1,5 +1,53 @@
 # Phase log
 
+## Model-led tool-calling chat — 2026-11-10
+
+- Replaced the deterministic draft/confirm flow with a Gemini tool-calling loop.
+  The model understands the turn, calls quote, chart, option-chain, news,
+  dividend, earnings, metric, switch, and UI tools, and writes the answer in the
+  user's language.
+- `compute_position` runs the deterministic Python metrics pipeline; the model
+  writes the explanation. The analysis card and model text are rendered together.
+- Added Twelve Data dividends, Finnhub earnings, and bounded tool results.
+- Added `set_chart_toggles`, `set_theme`, and `set_chart_range`; the client
+  applies `ui_actions` to `Preferences` and persists them.
+- Removed deterministic conversational text and client fast paths. Deterministic
+  English is limited to service errors, hard safety blocks, validation,
+  degradation warnings, and progress labels.
+- Added a 20-call/60-second tool-loop limit, production per-IP rate limiting, and
+  disabled Swagger/ReDoc/OpenAPI in production.
+- Tool failures now return failed steps with English detail instead of HTTP 500;
+  the model explains the failure and suggests nearby strikes or a retry.
+- The chat shows a `Thinking...` running step and replaces it with `done`/`failed`
+  steps. Failed requests show a failed `Assistant request failed` step with the
+  visible error detail.
+- Tests: backend 121 pass; frontend 65 pass; Ruff and Pyright pass; production
+  build succeeds.
+- Live `uvicorn` check on 2026-11-10: the Russian command
+  "включи обе средние линии на графике" returned `chart_toggle` actions for
+  SMA20 and SMA50, and the Russian request
+  "купить колл AAPL 245 на 2026-12-18" returned a
+  `Long Call AAPL 245 2026-12-18` card plus a Russian explanation.
+- Live failure check: "купить колл около 765 до 20 ноября" returned a failed
+  `Computing metrics` step with
+  "Executable quotes are unavailable for SPY call 765 2026-11-20." and the
+  model suggested nearby listed strikes instead of returning HTTP 500.
+
+## English-only deterministic chat text — 2026-11-10
+
+- The deterministic control text and the yes/cancel/switch fast paths are now
+  English-only. The chat model answers in the language of the user's question;
+  for non-English confirm/draft prompts it writes the prompt text from the
+  deterministic facts.
+- Removed the Russian helper-text catalog, the Russian fast-path patterns, and
+  the deterministic Russian market-answer fallback.
+- The Angular chat always uses English copy, role labels, activity labels,
+  warning labels, and error messages; it renders the model answer text as
+  received.
+- Backend and frontend tests were updated for English-only deterministic text
+  and non-English model answers.
+- Tests: backend 141 pass; frontend 68 pass; production build succeeds.
+
 ## Chat localization — 2026-11-08
 
 - All deterministic chat text now follows the question language:
@@ -16,7 +64,7 @@
   languages receive the model answer in the question language with English
   helper templates.
 - Tests: backend 139 pass; frontend 68 pass; production build succeeds.
-- Live API check: a UTF-8 Russian "хочу купить колл" request returned
+- Live API check: a UTF-8 Russian "buy a call" request returned
   `mode: "confirm"`, `language: "Russian"`, and Russian confirm text.
 
 ## Chat UX refinements — 2026-11-08
