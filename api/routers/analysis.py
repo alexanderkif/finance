@@ -404,6 +404,7 @@ async def _analysis_events(
     request: Request,
     body: AnalysisRunRequest,
     *,
+    include_synthesis: bool = True,
     is_disconnected: Callable[[], Awaitable[bool]] | None = None,
 ) -> AsyncGenerator[dict[str, object], None]:
     client = getattr(request.app.state, "http_client", None)
@@ -421,9 +422,26 @@ async def _analysis_events(
         detected_language=body.detected_language,
         history_loader=lambda: _load_historical_candles(request, symbol),
         news_loader=lambda: _load_analysis_news(request, symbol),
+        include_synthesis=include_synthesis,
         is_disconnected=is_disconnected,
     ):
         yield event
+
+
+async def compute_analysis(
+    request: Request,
+    body: AnalysisRunRequest,
+) -> AnalysisResult:
+    result: AnalysisResult | None = None
+    async for event in _analysis_events(request, body, include_synthesis=False):
+        if event["type"] == "result":
+            result = AnalysisResult.model_validate(event["result"])
+    if result is None:
+        raise HTTPException(
+            status_code=502,
+            detail="The analysis ended without a result. Please try again.",
+        )
+    return result
 
 
 @router.post(

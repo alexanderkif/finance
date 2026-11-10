@@ -139,6 +139,49 @@ class ChatConfirm(BaseModel):
     position: AnalysisPosition
 
 
+class ChatStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    label: str
+    status: Literal["running", "done", "failed"]
+    detail: str | None = None
+
+
+class ChatChartToggles(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sma20: bool = False
+    sma50: bool = False
+    rsi: bool = False
+    levels: bool = True
+
+
+class ChatUiState(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    theme: Literal["light", "dark"] = "light"
+    symbol: str = "AAPL"
+    range: ChartRange = "6mo"
+    chart_toggles: ChatChartToggles = Field(default_factory=ChatChartToggles)
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, value: str) -> str:
+        normalized = value.strip().upper().removeprefix("_")
+        if not _SYMBOL_PATTERN.fullmatch(normalized):
+            raise ValueError("Symbol contains invalid characters.")
+        return normalized
+
+
+class ChatUiAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["chart_toggle", "theme", "chart_range"]
+    key: Literal["sma20", "sma50", "rsi", "levels"] | None = None
+    value: bool | str | None = None
+
+
 class ChatTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -151,6 +194,7 @@ class ChatTurnRequest(BaseModel):
     context: list[AnalysisPosition] = Field(default_factory=list, max_length=3)
     continuation: bool = False
     market: ChatMarketSnapshot
+    ui: ChatUiState | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -180,6 +224,9 @@ class ChatTurnResponse(BaseModel):
     confirm: ChatConfirm | None = None
     switch: ChatSwitch | None = None
     pending_draft: ChatDraft | None = None
+    card: dict[str, object] | None = None
+    steps: list[ChatStep] = Field(default_factory=list)
+    ui_actions: list[ChatUiAction] = Field(default_factory=list)
     as_of: datetime | None = None
     degraded: bool = False
     warnings: list[str] = Field(default_factory=list)

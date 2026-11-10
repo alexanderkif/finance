@@ -1,6 +1,6 @@
 import asyncio
 import time
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Final
 
 import httpx
@@ -9,7 +9,9 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from settings import require_twelve_data_api_key
 
 TWELVE_DATA_URL: Final = "https://api.twelvedata.com/time_series"
+TWELVE_DATA_DIVIDENDS_URL: Final = "https://api.twelvedata.com/dividends"
 TWELVE_DATA_CACHE_TTL_SECONDS: Final = 60.0
+TWELVE_DATA_DIVIDENDS_CACHE_TTL_SECONDS: Final = 300.0
 TWELVE_DATA_RETRY_DELAY_SECONDS: Final = 0.25
 
 
@@ -61,6 +63,29 @@ class _TimeSeriesResponse(BaseModel):
     message: str | None = None
 
 
+class DividendEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ex_date: date
+    amount: float
+
+
+class _DividendValue(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    ex_date: str
+    amount: float
+
+
+class _DividendsResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    status: str | None = None
+    dividends: list[_DividendValue] = []
+    code: int | None = None
+    message: str | None = None
+
+
 class TwelveDataProvider:
     def __init__(
         self,
@@ -70,6 +95,7 @@ class TwelveDataProvider:
         self._client = client
         self._cache_ttl_seconds = cache_ttl_seconds
         self._cache: dict[tuple[str, ChartRange], tuple[float, list[Candle]]] = {}
+        self._dividends_cache: dict[str, tuple[float, list[DividendEvent]]] = {}
 
     async def get_daily_candles(
         self,
@@ -163,6 +189,91 @@ class TwelveDataProvider:
         )
         self._cache[key] = (time.monotonic(), candles)
         return candles
+
+    async def get_dividends(
+        self,
+        symbol: str,
+        output_size: int = 8,
+    ) -> list[DividendEvent]:
+        normalized_symbol = symbol.strip().upper().removeprefix("_").removeprefix("^")
+        if not normalized_symbol:
+            raise ValueError("Symbol must not be empty.")
+        if output_size < 1 or output_size > 100:
+            raise ValueError("The dividend output size must be between 1 and 100.")
+        cached = self._dividends_cache.get(normalized_symbol)
+        now = time.monotonic()
+        if (
+            cached is not None
+            and now - cached[0] < TWELVE_DATA_DIVIDENDS_CACHE_TTL_SECONDS
+        ):
+            return cached[1][:output_size]
+
+        try:
+            api_key = require_twelve_data_api_key()
+        except RuntimeError as error:
+            raise TwelveDataConfigurationError(str(error)) from error
+
+        attempts = 2
+        response: httpx.Response | None = None
+        for attempt in range(attempts):
+            try:
+                response = await self._client.get(
+                    TWELVE_DATA_DIVIDENDS_URL,
+                    params={
+                        "symbol": normalized_symbol,
+                        "outputsize": str(output_size),
+                        "format": "JSON",
+                    },
+                    headers={"Authorization": f"apikey {api_key}"},
+                    timeout=20.0,
+                )
+            except httpx.RequestError as error:
+                if attempt < attempts - 1:
+                    await asyncio.sleep(TWELVE_DATA_RETRY_DELAY_SECONDS)
+                    continue
+                raise TwelveDataRequestError(
+                    "The dividend provider could not be reached."
+                ) from error
+            if 500 <= response.status_code < 600 and attempt < attempts - 1:
+                await asyncio.sleep(TWELVE_DATA_RETRY_DELAY_SECONDS)
+                continue
+            break
+
+        if response is None:
+            raise TwelveDataRequestError("The dividend provider did not respond.")
+
+        try:
+            data = response.json()
+        except ValueError:
+            data = None
+
+        if response.status_code >= 400:
+            api_code = data.get("code") if isinstance(data, dict) else None
+            api_message = data.get("message") if isinstance(data, dict) else None
+            self._raise_for_api_error(
+                api_code if isinstance(api_code, int) else response.status_code,
+                api_message if isinstance(api_message, str) else None,
+            )
+
+        try:
+            payload = _DividendsResponse.model_validate(data)
+        except (ValidationError, ValueError) as error:
+            raise TwelveDataPayloadError(
+                "The dividend provider returned an invalid payload."
+            ) from error
+        if payload.status == "error":
+            self._raise_for_api_error(payload.code, payload.message)
+
+        events: list[DividendEvent] = []
+        for value in payload.dividends:
+            try:
+                ex_date = date.fromisoformat(value.ex_date)
+            except ValueError:
+                continue
+            events.append(DividendEvent(ex_date=ex_date, amount=value.amount))
+        events.sort(key=lambda event: event.ex_date, reverse=True)
+        self._dividends_cache[normalized_symbol] = (time.monotonic(), events)
+        return events[:output_size]
 
     def _raise_for_api_error(
         self,

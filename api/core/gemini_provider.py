@@ -161,28 +161,32 @@ def _read_model_text(response_data: object) -> str:
     raise GeminiResponseError("Gemini returned no structured text.")
 
 
-async def generate_structured(
+async def generate_content(
     client: httpx.AsyncClient,
     *,
     system_instruction: str,
-    response_schema: dict[str, object],
-    message: str,
+    contents: list[dict[str, object]],
+    tools: list[dict[str, object]] | None = None,
     temperature: float = 0.0,
+    response_schema: dict[str, object] | None = None,
 ) -> dict[str, object]:
     try:
         api_key = require_gemini_api_key()
     except RuntimeError as error:
         raise GeminiConfigurationError(str(error)) from error
 
+    generation_config: dict[str, object] = {"temperature": temperature}
+    if response_schema is not None:
+        generation_config["responseMimeType"] = "application/json"
+        generation_config["responseSchema"] = response_schema
     request_body: dict[str, object] = {
         "systemInstruction": {"parts": [{"text": system_instruction}]},
-        "contents": [{"parts": [{"text": message}]}],
-        "generationConfig": {
-            "temperature": temperature,
-            "responseMimeType": "application/json",
-            "responseSchema": response_schema,
-        },
+        "contents": contents,
+        "generationConfig": generation_config,
     }
+    if tools:
+        request_body["tools"] = tools
+
     attempts = len(_GEMINI_RETRY_DELAYS) + 1
     response: httpx.Response | None = None
     for attempt in range(attempts):
@@ -214,7 +218,31 @@ async def generate_structured(
         raise GeminiRequestError(_UNAVAILABLE_MESSAGE)
 
     try:
-        response_text = _read_model_text(response.json())
+        data = response.json()
+    except ValueError as error:
+        raise GeminiResponseError("Gemini returned an invalid response.") from error
+    if not isinstance(data, dict):
+        raise GeminiResponseError("Gemini returned an invalid response.")
+    return cast(dict[str, object], data)
+
+
+async def generate_structured(
+    client: httpx.AsyncClient,
+    *,
+    system_instruction: str,
+    response_schema: dict[str, object],
+    message: str,
+    temperature: float = 0.0,
+) -> dict[str, object]:
+    data = await generate_content(
+        client,
+        system_instruction=system_instruction,
+        contents=[{"role": "user", "parts": [{"text": message}]}],
+        temperature=temperature,
+        response_schema=response_schema,
+    )
+    try:
+        response_text = _read_model_text(data)
         decoded = json.loads(response_text)
     except (ValueError, TypeError) as error:
         raise GeminiResponseError(

@@ -40,6 +40,18 @@ class NewsHeadline(BaseModel):
     published_at: datetime | None = None
 
 
+class EarningsEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    date: date
+    quarter: int | None = None
+    year: int | None = None
+    eps_estimate: float | None = None
+    eps_actual: float | None = None
+    revenue_estimate: float | None = None
+    revenue_actual: float | None = None
+
+
 class FinnhubProvider:
     def __init__(
         self,
@@ -52,6 +64,7 @@ class FinnhubProvider:
             tuple[str, int, bool],
             tuple[float, list[NewsHeadline]],
         ] = {}
+        self._earnings_cache: dict[str, tuple[float, list[EarningsEvent]]] = {}
 
     async def get_headlines(
         self,
@@ -120,12 +133,84 @@ class FinnhubProvider:
             allow_general_fallback=False,
         )
 
-    async def _get_items(
+    async def get_earnings(
+        self,
+        symbol: str,
+        limit: int = 4,
+        today: date | None = None,
+        *,
+        past_days: int = 30,
+        future_days: int = 90,
+    ) -> list[EarningsEvent]:
+        normalized_symbol = symbol.strip().upper().removeprefix("_").removeprefix("^")
+        if not normalized_symbol:
+            raise ValueError("Symbol must not be empty.")
+        if limit < 1 or limit > 20:
+            raise ValueError("The earnings limit must be between 1 and 20.")
+        cached = self._earnings_cache.get(normalized_symbol)
+        now = time.monotonic()
+        if cached is not None and now - cached[0] < self._cache_ttl_seconds:
+            return cached[1][:limit]
+
+        try:
+            api_key = require_finnhub_api_key()
+        except RuntimeError as error:
+            raise FinnhubConfigurationError(str(error)) from error
+
+        current_day = today or datetime.now(UTC).date()
+        data = await self._get_json(
+            "calendar/earnings",
+            {
+                "symbol": normalized_symbol,
+                "from": (current_day - timedelta(days=past_days)).isoformat(),
+                "to": (current_day + timedelta(days=future_days)).isoformat(),
+            },
+            {"X-Finnhub-Token": api_key},
+        )
+        if data is None:
+            return []
+        if not isinstance(data, dict):
+            raise FinnhubRequestError(
+                "The earnings provider returned an invalid payload."
+            )
+        items = data.get("earningsCalendar")
+        if not isinstance(items, list):
+            raise FinnhubRequestError(
+                "The earnings provider returned an invalid payload."
+            )
+
+        events: list[EarningsEvent] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            raw_date = item.get("date")
+            if not isinstance(raw_date, str):
+                continue
+            try:
+                event_date = date.fromisoformat(raw_date)
+            except ValueError:
+                continue
+            events.append(
+                EarningsEvent(
+                    date=event_date,
+                    quarter=_optional_int(item.get("quarter")),
+                    year=_optional_int(item.get("year")),
+                    eps_estimate=_optional_float(item.get("epsEstimate")),
+                    eps_actual=_optional_float(item.get("epsActual")),
+                    revenue_estimate=_optional_float(item.get("revenueEstimate")),
+                    revenue_actual=_optional_float(item.get("revenueActual")),
+                )
+            )
+        events.sort(key=lambda event: event.date)
+        self._earnings_cache[normalized_symbol] = (time.monotonic(), events)
+        return events[:limit]
+
+    async def _get_json(
         self,
         path: str,
         params: dict[str, str],
         headers: dict[str, str],
-    ) -> list[object]:
+    ) -> object | None:
         attempts = 2
         response: httpx.Response | None = None
         for attempt in range(attempts):
@@ -155,20 +240,58 @@ class FinnhubProvider:
         if response.status_code in (401, 403):
             raise FinnhubConfigurationError("The news provider key was rejected.")
         if response.status_code == 404:
-            return []
+            return None
         if response.status_code >= 400:
             raise FinnhubRequestError(
                 f"The news provider returned HTTP {response.status_code}."
             )
         try:
-            data = response.json()
+            return response.json()
         except ValueError as error:
             raise FinnhubRequestError(
                 "The news provider returned an invalid payload."
             ) from error
+
+    async def _get_items(
+        self,
+        path: str,
+        params: dict[str, str],
+        headers: dict[str, str],
+    ) -> list[object]:
+        data = await self._get_json(path, params, headers)
+        if data is None:
+            return []
         if not isinstance(data, list):
             raise FinnhubRequestError("The news provider returned an invalid payload.")
         return list(data)
+
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(float(value))
+        except ValueError:
+            return None
+    return None
+
+
+def _optional_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
 
 
 def _normalize_headlines(

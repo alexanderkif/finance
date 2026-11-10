@@ -44,7 +44,7 @@ class AnalysisResult(BaseModel):
     strategy_key: PlaybookKey
     intent: Literal["open", "close", "roll"]
     header: str
-    recommendation: str
+    recommendation: str = Field(default="", max_length=2000)
     probability_positive: float | None
     max_profit: float | None
     max_loss: float | None
@@ -91,6 +91,7 @@ async def run_analysis_events(
     news_loader: Callable[
         [], Coroutine[Any, Any, tuple[list[NewsHeadline], list[str]]]
     ],
+    include_synthesis: bool = True,
     is_disconnected: Callable[[], Awaitable[bool]] | None = None,
 ) -> AsyncGenerator[dict[str, object], None]:
     history_task = asyncio.create_task(history_loader())
@@ -186,33 +187,35 @@ async def run_analysis_events(
         )
         yield _stage("metrics", "done", header)
 
-        if await _disconnected(is_disconnected):
-            return
-        yield _stage("synthesis", "started", "Writing the assessment")
-        synthesis_task = asyncio.create_task(
-            synthesize(
-                client,
-                playbook=playbook,
-                position=position,
-                header=header,
-                metrics=metrics,
-                market_price=market.price,
-                change_pct=market.change_pct,
-                intent=intent,
-                detected_language=detected_language,
-                news=news,
-            )
-        )
-        while not synthesis_task.done():
-            done, _ = await asyncio.wait({synthesis_task}, timeout=10)
-            if done:
-                break
+        recommendation = ""
+        if include_synthesis:
             if await _disconnected(is_disconnected):
-                synthesis_task.cancel()
                 return
-            yield {"type": "heartbeat"}
-        recommendation = synthesis_task.result()
-        yield _stage("synthesis", "done", "Assessment ready")
+            yield _stage("synthesis", "started", "Writing the assessment")
+            synthesis_task = asyncio.create_task(
+                synthesize(
+                    client,
+                    playbook=playbook,
+                    position=position,
+                    header=header,
+                    metrics=metrics,
+                    market_price=market.price,
+                    change_pct=market.change_pct,
+                    intent=intent,
+                    detected_language=detected_language,
+                    news=news,
+                )
+            )
+            while not synthesis_task.done():
+                done, _ = await asyncio.wait({synthesis_task}, timeout=10)
+                if done:
+                    break
+                if await _disconnected(is_disconnected):
+                    synthesis_task.cancel()
+                    return
+                yield {"type": "heartbeat"}
+            recommendation = synthesis_task.result()
+            yield _stage("synthesis", "done", "Assessment ready")
 
         warnings = [*metrics.warnings, *chain.warnings, *news_warnings]
         result = AnalysisResult(

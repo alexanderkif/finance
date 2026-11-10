@@ -145,13 +145,12 @@ def check_chat_request(
 
 
 def check_chat_turn_request(message: str, symbol: str) -> None:
-    """Scope check for the conversational endpoint.
+    """Hard safety check for the conversational endpoint.
 
-    Greetings and market questions about the selected instrument are allowed;
-    the option-vocabulary and teaching-question guards apply only to the
-    structured parse endpoint. Hacking, credential probing, personal use,
-    prompt injection, abuse, unsupported strategies, and unsafe input are still
-    refused deterministically.
+    Greetings, market questions, off-topic requests, and unsupported strategies
+    are left to the chat model. Prompt injection, hacking, credential probing,
+    abuse, oversized input, too many legs, and unsafe input are still refused
+    deterministically.
     """
     normalized = message.strip()
     if len(normalized) > MAX_MESSAGE_LENGTH:
@@ -164,10 +163,6 @@ def check_chat_turn_request(message: str, symbol: str) -> None:
         raise GuardrailViolation(_HACKING_MESSAGE)
     if _ABUSIVE.search(normalized):
         raise GuardrailViolation(_ABUSIVE_MESSAGE)
-    if _OFF_TOPIC.search(normalized):
-        raise GuardrailViolation(_OUT_OF_SCOPE)
-    if _UNSUPPORTED_STRATEGY.search(normalized):
-        raise GuardrailViolation(_UNSUPPORTED_STRATEGY_MESSAGE)
     if (
         len(_SIDE_ACTIONS.findall(normalized)) > MAX_LEGS
         or len(_LEG_MENTIONS.findall(normalized)) > MAX_LEGS
