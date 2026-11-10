@@ -1,6 +1,13 @@
 ﻿import { DatePipe, DecimalPipe } from '@angular/common';
 import { httpResource } from '@angular/common/http';
-import { Component, afterNextRender, computed, inject, signal } from '@angular/core';
+import {
+  Component,
+  afterNextRender,
+  computed,
+  effect,
+  inject,
+  signal,
+} from '@angular/core';
 import { errorMessage } from './api-error';
 import { AnalysisChat } from './components/analysis-chat/analysis-chat';
 import { PriceChart } from './components/price-chart/price-chart';
@@ -187,9 +194,12 @@ export class App {
   protected readonly warningLabel = warningLabel;
 
   constructor() {
+    effect(() => {
+      this.tickerInput.set(this.symbol());
+    });
+
     afterNextRender(() => {
       this.browserReady.set(true);
-      this.tickerInput.set(this.symbol());
     });
   }
 

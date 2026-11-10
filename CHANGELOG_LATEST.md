@@ -1,5 +1,26 @@
 # Phase log
 
+## Market session awareness and chat fixes - 2026-11-10
+
+- Added a deterministic US options session clock (`America/New_York`):
+  pre-market, open, after-hours, and closed, with the next open and close.
+- Option-chain and quote payloads now carry `market_session` and
+  `quote_age_minutes`. When every returned contract has a zero or missing
+  bid/ask, the chain adds `quotes_unavailable_outside_session` outside regular
+  hours or `quotes_unavailable` during the session.
+- A failed `compute_position` error payload now includes the session and the
+  matching warning, so the chat explains that zero quotes are expected outside
+  regular hours instead of calling the contract illiquid or suggesting another
+  strike.
+- The chat system instruction now treats zero quotes as a session problem first
+  and only suggests a nearby strike when the market is open.
+- The ticker input now follows `Preferences.symbol`, so a symbol switch made
+  from chat updates the visible ticker field.
+- The SSR request handler ignores client-aborted renders instead of logging an
+  `AbortError`.
+- Tests: backend 131 pass; frontend 67 pass; Ruff, Pyright, and the production
+  build pass.
+
 ## Model-led tool-calling chat — 2026-11-10
 
 - Replaced the deterministic draft/confirm flow with a Gemini tool-calling loop.

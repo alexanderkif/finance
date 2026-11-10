@@ -10,6 +10,7 @@ import {
   MarketResponse,
 } from './models/market-data';
 import { MarketApi } from './services/market-data';
+import { Preferences } from './services/preferences';
 
 const chartStub: ChartResponse = {
   symbol: 'AAPL',
@@ -230,6 +231,16 @@ describe('App', () => {
 
     expect(compiled.querySelector('#ticker')).toHaveProperty('value', 'TSLA');
     expect(localStorage.getItem('osa.symbol')).toBe('TSLA');
+  });
+
+  it('syncs the ticker input when the chosen instrument changes elsewhere', async () => {
+    const { fixture, compiled } = await renderDashboard();
+    const preferences = TestBed.inject(Preferences);
+
+    preferences.setSymbol('TSLA');
+    fixture.detectChanges();
+
+    expect(compiled.querySelector('#ticker')).toHaveProperty('value', 'TSLA');
   });
 
   it('toggles the theme and persists it', async () => {

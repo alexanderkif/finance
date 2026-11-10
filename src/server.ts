@@ -42,8 +42,22 @@ app.use((req, res, next) => {
   angularApp
     .handle(req)
     .then((response) => (response ? writeResponseToNodeResponse(response, res) : next()))
-    .catch(next);
+    .catch((error: unknown) => {
+      if (req.aborted || isAbortError(error)) {
+        return;
+      }
+      next(error);
+    });
 });
+
+function isAbortError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    (error as { name?: unknown }).name === 'AbortError'
+  );
+}
 
 /**
  * Start the server if this module is the main entry point, or it is ran via PM2.

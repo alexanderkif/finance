@@ -5,6 +5,10 @@ const WARNING_LABELS: Record<string, string> = {
   candles_rate_limited: 'The candle provider is rate limited.',
   candles_unavailable: 'Candles are temporarily unavailable.',
   quote_unavailable: 'The quote is unavailable.',
+  quotes_unavailable: 'Option quotes are unavailable for this contract.',
+  quotes_unavailable_outside_session:
+    'Option quotes are unavailable outside regular US market hours.',
+  quotes_stale: 'Option quotes have not updated recently.',
   price_unavailable: 'The price is unavailable.',
   change_pct_unavailable: 'The price change is unavailable.',
   vix_unavailable: 'VIX is unavailable.',

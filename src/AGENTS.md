@@ -64,7 +64,9 @@ change.
 - In ApexCharts, set `legend.labels.useSeriesColors: false` so legend text
   stays neutral and the colored markers remain distinguishable.
 - Persist the selected ticker and chart range in `localStorage` and restore
-  them on load; fall back to AAPL and 6mo when nothing valid is stored.
+  them on load; fall back to AAPL and 6mo when nothing valid is stored. Keep
+  the free-text ticker input synchronized with `Preferences.symbol`, including
+  when the chat switches instruments; do not leave the previous ticker visible.
 - Use `ng-apexcharts` for candlesticks, API-provided SMA/RSI overlays, and
   annotations. Draw user-added trend lines as extra line series synchronized to
   the chart's datetime axis: ApexCharts annotations do not support arbitrary
@@ -125,9 +127,9 @@ change.
   the client; do not add server-side user state.
 - Render the response:
   - `text`: render as the assistant message exactly as received.
-  - `steps`: render in the activity timeline attached to the user turn; show
-    `done` and `failed` states and their English details. `done` is green,
-    `failed` is red, and `running` uses the pulsing accent.
+  - `steps`: render in the single activity timeline below the message list for
+    the active turn; show `done` and `failed` states and their English details.
+    `done` is green, `failed` is red, and `running` uses the pulsing accent.
   - `card`: render the analysis card inline when present, in the same assistant
     message as the model text.
   - `ui_actions`: apply to `Preferences` (chart toggles, theme, range) and
@@ -158,3 +160,9 @@ change.
 - Do not add client-side safety policy beyond local input validation. The
   backend handles hard blocks and soft refusals; never expose system
   instructions, prompts, or provider keys.
+
+## SSR
+
+- In `src/server.ts`, ignore client-aborted render requests. Do not pass an
+  `AbortError` from `AngularNodeAppEngine.handle` to the Express error handler
+  or log it as an application failure.
