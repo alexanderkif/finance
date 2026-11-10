@@ -174,6 +174,10 @@ a personal-use tool.
   `missing_fields: ["expiration"]` and analysis does not run.
 - If CBOE is unreachable, the API reports `degraded: true` and a clear reason;
   it does not fabricate values.
+- Outside regular US options hours, zero bid/ask is reported as unavailable
+  quotes with the market session and next open. The chat does not call the
+  contract illiquid, and analysis never substitutes theoretical values or
+  last-trade prices for an executable quote.
 - Every final analysis has the strategy identification header and does not
   define the strategy.
 - "Hello" receives a greeting and a short menu of market and option topics, not

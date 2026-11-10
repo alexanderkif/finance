@@ -144,6 +144,10 @@ The UI supports light and dark themes; the theme and selected instrument are
 persisted in `localStorage`, and the stored theme is applied before hydration.
 Market data is delayed and labelled **Delayed 15 min**. Unavailable data is
 shown as an explicit empty or degraded state, never as a fabricated value.
+Outside regular US options hours, CBOE can return zero bid/ask. The API reports
+the US market session and the next open, and the chat explains that the quotes
+are unavailable rather than calling the contract illiquid. Metrics are never
+computed from zero quotes, theoretical values, or last-trade prices.
 
 Data is fetched in the browser after hydration: the prerendered HTML ships the
 dashboard shell with explicit unavailable states, because the API is not

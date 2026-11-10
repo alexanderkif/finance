@@ -5,6 +5,7 @@ from typing import Final, Literal, NamedTuple
 from urllib.parse import quote
 
 import httpx
+from core.market_clock import MarketSession, market_session, quote_age_minutes
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 CBOE_OPTIONS_URL: Final = (
@@ -111,6 +112,8 @@ class OptionChainResponse(BaseModel):
     degraded: bool = False
     reason: Literal["rate_limited", "upstream_error"] | None = None
     warnings: list[str] = Field(default_factory=list)
+    market_session: MarketSession | None = None
+    quote_age_minutes: int | None = None
 
 
 class CboeMarketQuote(BaseModel):
@@ -119,6 +122,8 @@ class CboeMarketQuote(BaseModel):
     change_pct: float | None
     source: Literal["cboe_delayed"] = "cboe_delayed"
     as_of: datetime
+    market_session: MarketSession | None = None
+    quote_age_minutes: int | None = None
 
 
 class CboeIndexQuote(BaseModel):
@@ -200,6 +205,34 @@ def normalize_cboe_symbol(symbol: str) -> str:
 
 def _bare_symbol(value: str) -> str:
     return value.strip().upper().removeprefix("_").removeprefix("^")
+
+
+def _is_executable(contract: CboeOptionQuote) -> bool:
+    return (
+        contract.bid is not None
+        and contract.ask is not None
+        and contract.bid > 0
+        and contract.ask > 0
+    )
+
+
+def _append_warning(warnings: list[str], code: str) -> None:
+    if code not in warnings:
+        warnings.append(code)
+
+
+def _append_quote_warnings(
+    warnings: list[str],
+    contracts: list[CboeOptionQuote],
+    session: MarketSession,
+) -> None:
+    if contracts and not any(_is_executable(contract) for contract in contracts):
+        _append_warning(
+            warnings,
+            "quotes_unavailable"
+            if session.is_open
+            else "quotes_unavailable_outside_session",
+        )
 
 
 class CboeOptionsProvider:
@@ -286,39 +319,34 @@ class CboeOptionsProvider:
         expiration: date | None = None,
     ) -> OptionChainResponse:
         _, payload, cache_warnings, reason = await self._get_payload(symbol)
-        result = OptionChainResponse(
-            symbol=_bare_symbol(symbol),
-            contracts=payload.data.options,
-            as_of=payload.timestamp,
-            degraded=bool(cache_warnings),
-            reason=reason,
-            warnings=list(cache_warnings),
-        )
-        if expiration is None:
-            return result
-
-        contracts = []
-        unrecognized_symbols = 0
-        for contract in result.contracts:
-            contract_expiration = option_expiration(contract.option)
-            if contract_expiration is None:
-                unrecognized_symbols += 1
-            elif contract_expiration == expiration:
-                contracts.append(contract)
-
+        session = market_session()
+        contracts = payload.data.options
         warnings = list(cache_warnings)
-        if unrecognized_symbols:
-            warnings.append(
-                f"Excluded {unrecognized_symbols} contracts with unrecognized "
-                "option symbols from the expiration filter."
-            )
-        return result.model_copy(
-            update={
-                "expiration": expiration,
-                "contracts": contracts,
-                "warnings": warnings,
-                "degraded": bool(warnings),
-            }
+        if expiration is not None:
+            contracts = []
+            unrecognized_symbols = 0
+            for contract in payload.data.options:
+                contract_expiration = option_expiration(contract.option)
+                if contract_expiration is None:
+                    unrecognized_symbols += 1
+                elif contract_expiration == expiration:
+                    contracts.append(contract)
+            if unrecognized_symbols:
+                warnings.append(
+                    f"Excluded {unrecognized_symbols} contracts with unrecognized "
+                    "option symbols from the expiration filter."
+                )
+        _append_quote_warnings(warnings, contracts, session)
+        return OptionChainResponse(
+            symbol=_bare_symbol(symbol),
+            expiration=expiration,
+            contracts=contracts,
+            as_of=payload.timestamp,
+            degraded=bool(warnings),
+            reason=reason,
+            warnings=warnings,
+            market_session=session,
+            quote_age_minutes=quote_age_minutes(payload.timestamp),
         )
 
     async def get_market_quote(self, symbol: str) -> CboeMarketQuote:
@@ -328,6 +356,8 @@ class CboeOptionsProvider:
             price=payload.data.current_price,
             change_pct=payload.data.price_change_percent,
             as_of=payload.timestamp,
+            market_session=market_session(),
+            quote_age_minutes=quote_age_minutes(payload.timestamp),
         )
 
     async def get_index_quote(self, symbol: str) -> CboeIndexQuote:

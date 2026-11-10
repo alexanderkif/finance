@@ -468,3 +468,25 @@ XSP 2026-11-20` resolves to `bull_put_spread`; `buy call SPY 600` returns
   "купить колл около 765 до 20 ноября" returned a failed `Computing metrics`
   step with the exact quote error and nearby listed-strike suggestions instead
   of HTTP 500.
+
+## Market session awareness [x]
+
+- [x] Add `api/core/market_clock.py` with pre-market, regular, after-hours, and
+      closed states in `America/New_York`, plus the next open and close.
+- [x] Include `market_session` and `quote_age_minutes` in option-chain and
+      quote payloads.
+- [x] Add `quotes_unavailable_outside_session` when every returned contract has
+      zero or missing bid/ask outside regular hours, and `quotes_unavailable`
+      during the session.
+- [x] Carry the session and warning in a failed `compute_position` tool payload
+      so the model explains unavailable quotes instead of calling the contract
+      illiquid or suggesting another strike.
+- [x] Synchronize the free-text ticker input with `Preferences.symbol` after a
+      chat-driven instrument switch.
+- [x] Ignore client-aborted SSR renders in `src/server.ts` instead of logging an
+      `AbortError`.
+- Evidence on 2026-11-10: backend 131 tests pass; frontend 67 tests pass; Ruff,
+  Pyright, and the production build pass. A live pre-market SPY chain for
+  2026-11-20 returned `market_session.status: "pre_market"`,
+  `quote_age_minutes: 37`, and `warnings: ["quotes_unavailable_outside_session"]`
+  with 506 listed contracts.

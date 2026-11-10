@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 import httpx
 from core.indicators import Candle
+from core.market_clock import market_session
 from index import app
 
 STRIKES = [220, 225, 230, 235, 240, 245, 250, 255, 260]
@@ -182,6 +183,7 @@ class ChatAgentApiTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.gemini_status = 200
         self.cboe_status = 200
+        self.cboe_options: dict[str, object] | None = None
         self.twelve_status = 200
         self.finnhub_status = 200
         self.gemini_requests: list[httpx.Request] = []
@@ -223,7 +225,7 @@ class ChatAgentApiTests(unittest.IsolatedAsyncioTestCase):
             self.cboe_requests.append(request)
             if self.cboe_status != 200:
                 return httpx.Response(self.cboe_status, json={})
-            return httpx.Response(200, json=cboe_payload())
+            return httpx.Response(200, json=self.cboe_options or cboe_payload())
         if request.url.host == "generativelanguage.googleapis.com":
             self.gemini_requests.append(request)
             if self.gemini_status != 200:
@@ -350,6 +352,51 @@ class ChatAgentApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["card"]["header"], "Long Call AAPL 245 2026-12-18")
         self.assertEqual(body["card"]["recommendation"], "")
         self.assertEqual(len(self.gemini_requests), 2)
+
+    async def test_compute_failure_reports_the_market_session(self) -> None:
+        payload = cboe_payload()
+        data = payload["data"]
+        assert isinstance(data, dict)
+        options = data["options"]
+        assert isinstance(options, list)
+        for option in options:
+            assert isinstance(option, dict)
+            option["bid"] = 0.0
+            option["ask"] = 0.0
+        self.cboe_options = payload
+        self.gemini_responses = [
+            gemini_call(
+                "compute_position",
+                {
+                    "legs": [
+                        {
+                            "symbol": "AAPL",
+                            "side": "buy",
+                            "option_type": "call",
+                            "strike": 245,
+                            "expiration": EXPIRATION,
+                        }
+                    ],
+                    "intent": "open",
+                },
+            ),
+            gemini_text("The option market is in pre-market, so quotes are zero."),
+        ]
+
+        session = market_session(datetime(2026, 11, 10, 12, 20, tzinfo=UTC))
+        with patch("agent.tools.market_session", return_value=session):
+            response = await self.post(base_request("buy the 245 call"))
+
+        body = response.json()
+        self.assertEqual(body["steps"][0]["status"], "failed")
+        compute = function_responses(self.gemini_requests)["compute_position"]
+        session_payload = compute["market_session"]
+        assert isinstance(session_payload, dict)
+        self.assertEqual(session_payload["status"], "pre_market")
+        self.assertEqual(
+            compute["warnings"],
+            ["quotes_unavailable_outside_session"],
+        )
 
     async def test_compute_failure_returns_a_failed_step_not_a_500(self) -> None:
         self.gemini_responses = [

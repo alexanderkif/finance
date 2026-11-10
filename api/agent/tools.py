@@ -19,6 +19,7 @@ from core.finnhub_provider import (
     NewsHeadline,
 )
 from core.indicators import ChartRange
+from core.market_clock import market_session
 from core.metrics import AnalysisPosition, OptionLeg
 from core.twelvedata_provider import (
     DividendEvent,
@@ -56,8 +57,8 @@ TOOL_DECLARATIONS: list[dict[str, object]] = [
     {
         "name": "get_quote",
         "description": (
-            "Get the delayed quote, percent change, VIX, and timestamps for a "
-            "symbol."
+            "Get the delayed quote, percent change, VIX, timestamps, and US "
+            "market session for a symbol."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -96,7 +97,8 @@ TOOL_DECLARATIONS: list[dict[str, object]] = [
         "name": "get_option_chain",
         "description": (
             "Get a bounded slice of the listed option chain for one expiration, "
-            "sorted by distance from the underlying price."
+            "sorted by distance from the underlying price, with the US market "
+            "session and executable-quote flags."
         ),
         "parameters": {
             "type": "OBJECT",
@@ -408,6 +410,12 @@ async def _get_quote(
             "vix": vix,
             "as_of": quote.as_of.isoformat(),
             "source": "cboe_delayed",
+            "quote_age_minutes": quote.quote_age_minutes,
+            "market_session": (
+                quote.market_session.to_payload()
+                if quote.market_session is not None
+                else None
+            ),
         },
         label="Loading quote",
         detail=f"{quote.symbol} {quote.price:g}" if quote.price is not None else None,
@@ -493,6 +501,11 @@ async def _get_option_expirations(
             "expirations": [value.isoformat() for value in expirations],
             "as_of": chain.as_of.isoformat() if chain.as_of else None,
             "warnings": chain.warnings,
+            "market_session": (
+                chain.market_session.to_payload()
+                if chain.market_session is not None
+                else None
+            ),
         },
         label="Loading expirations",
         detail=f"{len(expirations)} listed expirations",
@@ -550,6 +563,12 @@ async def _get_option_chain(
             "underlying_price": price,
             "as_of": chain.as_of.isoformat() if chain.as_of else None,
             "warnings": chain.warnings,
+            "quote_age_minutes": chain.quote_age_minutes,
+            "market_session": (
+                chain.market_session.to_payload()
+                if chain.market_session is not None
+                else None
+            ),
             "contracts": [
                 {
                     "option": contract.option,
@@ -563,6 +582,12 @@ async def _get_option_chain(
                     "vega": contract.vega,
                     "open_interest": contract.open_interest,
                     "volume": contract.volume,
+                    "executable": bool(
+                        contract.bid is not None
+                        and contract.ask is not None
+                        and contract.bid > 0
+                        and contract.ask > 0
+                    ),
                 }
                 for parsed, contract in (
                     (parse_occ_symbol(contract.option), contract)
@@ -727,14 +752,33 @@ async def _compute_position(
         if raw_intent in ("open", "close", "roll")
         else "open"
     )
-    result = await compute_analysis(
-        request,
-        AnalysisRunRequest(
-            position=position,
-            intent=intent,
-            detected_language="English",
-        ),
-    )
+    try:
+        result = await compute_analysis(
+            request,
+            AnalysisRunRequest(
+                position=position,
+                intent=intent,
+                detected_language="English",
+            ),
+        )
+    except ValueError as error:
+        session = market_session()
+        payload: dict[str, object] = {
+            "error": str(error),
+            "market_session": session.to_payload(),
+        }
+        if "Executable quotes are unavailable" in str(error):
+            payload["warnings"] = [
+                "quotes_unavailable"
+                if session.is_open
+                else "quotes_unavailable_outside_session"
+            ]
+        return ToolResult(
+            payload=payload,
+            label="Computing metrics",
+            detail=str(error),
+            failed=True,
+        )
     return ToolResult(
         payload=result.model_dump(mode="json"),
         label="Computing metrics",

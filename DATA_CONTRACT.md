@@ -44,6 +44,27 @@ or written approval before any commercial launch.
 - Return `source: "cboe_delayed"` and `as_of` on every CBOE-backed response.
 - The UI must identify the data as **Delayed 15 min** and retain attribution.
 
+## Exchange session and zero quotes
+
+- Compute the regular US options session from the current clock in
+  `America/New_York`: pre-market 04:00-09:30, regular 09:30-16:00,
+  after-hours 16:00-20:00, closed otherwise and on weekends.
+- Return the session with option-chain and quote payloads as `market_session`:
+  `status`, `is_open`, `exchange_time`, `next_open`, `next_close`, and
+  `timezone`. Normalize `next_open` and `next_close` to UTC for tool payloads.
+- The schedule covers regular weekdays only. Exchange holidays and early closes
+  are not enumerated; when the session says open but quotes are zero, report
+  quotes as unavailable rather than live.
+- CBOE delayed quotes can have `bid: 0` and `ask: 0` outside the regular
+  session even when `open_interest`, `volume`, `iv`, `delta`, `theo`, and
+  `last_trade_price` are present. Those fields are informational context, not
+  executable quotes.
+- When every contract in the requested expiration has a zero or missing
+  bid/ask, add `quotes_unavailable_outside_session` if the regular session is
+  not open, otherwise `quotes_unavailable`.
+- Never compute position metrics from `theo`, `last_trade_price`, or
+  `prev_day_close`, and never present them as a current executable price.
+
 ## CBOE index history (XSP, VIX)
 
 - URL:

@@ -260,6 +260,11 @@ and the snapshot never supplies an analysis metric.
 - Add UI state read/write: chart toggles, theme, and chart range, persisted
   through `Preferences`.
 - Add Twelve Data dividends and Finnhub earnings.
+- Report the US options session with chain and quote payloads; treat zero
+  bid/ask outside regular hours as unavailable quotes, not illiquidity, and
+  give the next open instead of suggesting another strike.
+- Keep the free-text ticker input synchronized with `Preferences.symbol` when
+  the chat switches instruments.
 - Limit the loop to 20 tool calls and 60 seconds; add production per-IP rate
   limiting and disable Swagger/ReDoc/OpenAPI in production.
 - Update [PRD.md](PRD.md), [API_SPEC.md](API_SPEC.md),

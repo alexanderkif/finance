@@ -1,6 +1,7 @@
 import time
 import unittest
 from datetime import UTC, date, datetime
+from unittest.mock import patch
 
 import httpx
 from core.cboe_provider import (
@@ -11,6 +12,7 @@ from core.cboe_provider import (
     _CboeOptionsPayload,
     normalize_cboe_symbol,
 )
+from core.market_clock import market_session
 
 
 def cboe_payload(
@@ -186,7 +188,10 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
             second = await provider.get_chain("SPY")
 
         self.assertEqual(request_count, 1)
-        self.assertEqual(first, second)
+        self.assertEqual(first.contracts, second.contracts)
+        self.assertEqual(first.as_of, second.as_of)
+        self.assertEqual(first.source, second.source)
+        self.assertIsNotNone(first.market_session)
 
     async def test_retries_a_5xx_once_without_caching(self) -> None:
         requests = 0
@@ -264,6 +269,67 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             with self.assertRaisesRegex(CboePayloadError, "unexpected symbol"):
                 await CboeOptionsProvider(client).get_chain("SPY")
+
+    async def test_flags_zero_quotes_outside_the_regular_session(self) -> None:
+        options: list[dict[str, object]] = [
+            {
+                "option": "SPY261120P00752000",
+                "bid": 0.0,
+                "ask": 0.0,
+                "iv": 0.1697,
+                "delta": -0.4635,
+                "open_interest": 5945,
+                "volume": 3095,
+            }
+        ]
+
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json=cboe_payload(options=options),
+            )
+
+        session = market_session(datetime(2026, 11, 10, 12, 20, tzinfo=UTC))
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = CboeOptionsProvider(client)
+            with patch("core.cboe_provider.market_session", return_value=session):
+                chain = await provider.get_chain("SPY", date(2026, 11, 20))
+
+        session_info = chain.market_session
+        assert session_info is not None
+        self.assertEqual(session_info.status, "pre_market")
+        self.assertIn("quotes_unavailable_outside_session", chain.warnings)
+        self.assertTrue(chain.degraded)
+
+    async def test_flags_zero_quotes_as_unavailable_when_the_session_is_open(
+        self,
+    ) -> None:
+        options: list[dict[str, object]] = [
+            {
+                "option": "SPY261120P00752000",
+                "bid": 0.0,
+                "ask": 0.0,
+                "open_interest": 5945,
+                "volume": 3095,
+            }
+        ]
+
+        async def handler(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json=cboe_payload(options=options),
+            )
+
+        session = market_session(datetime(2026, 11, 10, 15, 0, tzinfo=UTC))
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            provider = CboeOptionsProvider(client)
+            with patch("core.cboe_provider.market_session", return_value=session):
+                chain = await provider.get_chain("SPY", date(2026, 11, 20))
+
+        session_info = chain.market_session
+        assert session_info is not None
+        self.assertTrue(session_info.is_open)
+        self.assertIn("quotes_unavailable", chain.warnings)
 
     async def test_rejects_a_malformed_contract(self) -> None:
         payload = cboe_payload(options=[{"bid": 1.0}])

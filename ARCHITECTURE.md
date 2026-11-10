@@ -32,6 +32,7 @@ api/
 │   ├── chat_text.py              # English service and control text
 │   ├── indicators.py             # deterministic SMA/RSI and pivot levels
 │   ├── metrics.py                # deterministic calculations only
+│   ├── market_clock.py           # US options session and quote age
 │   └── playbooks/                # JSON playbook definitions
 ├── agent/
 │   ├── chat.py                   # tool-calling chat loop
@@ -46,6 +47,10 @@ The conversational flow uses `routers/chat.py` for `POST /api/chat/turn`,
 and metric tools, `core/chat_models.py` for the request/response and UI-state
 schemas, and `core/chat_text.py` for English service and control text. The
 Angular chat renders model text, tool steps, the analysis card, and UI actions.
+`core/market_clock.py` computes the regular US options session in
+`America/New_York`. Chain and quote payloads carry the session and quote age so
+zero bid/ask outside regular hours is reported as unavailable quotes, not as an
+illiquid contract, and is never replaced by `theo` or `last_trade_price`.
 
 Keep HTTP routing, provider access, deterministic metrics, and LLM orchestration
 in their respective modules. Providers are isolated behind adapters so the

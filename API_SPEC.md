@@ -106,7 +106,7 @@ Response fields:
 
 ```text
 symbol, expiration|null, contracts: OptionQuote[], source, as_of,
-degraded, reason|null, warnings[]
+degraded, reason|null, warnings[], market_session, quote_age_minutes
 ```
 
 `OptionQuote` includes the normalized fields defined in
@@ -123,6 +123,18 @@ degraded, reason|null, warnings[]
   `warnings: ["upstream_error"]`.
 - Degraded chain responses keep the real cached `as_of` timestamp and never
   fabricate contracts or values.
+- `market_session` reports the regular US options session at request time:
+  `status` (`pre_market`, `open`, `after_hours`, `closed`), `is_open`, the
+  exchange time, `next_open`, `next_close`, and `timezone`
+  (`America/New_York`). Times are ISO 8601. The schedule covers regular
+  weekdays only; exchange holidays and early closes are not enumerated.
+- When every returned contract has a zero or missing bid/ask, the response adds
+  `quotes_unavailable_outside_session` if the regular session is not open, or
+  `quotes_unavailable` if it is. Zero quotes are not treated as a price.
+  `theo`, `last_trade_price`, and `prev_day_close` are never substituted for an
+  executable bid/ask.
+- `quote_age_minutes` is the age of the delayed CBOE payload at request time.
+  It explains why a quote can still look stale outside the regular session.
 
 ## `POST /api/chat/turn`
 
@@ -231,6 +243,10 @@ compute_position(legs, intent?)
   recalculates a market value.
 - `compute_position` runs the deterministic Python metrics pipeline and returns
   the analysis card data. The model writes the explanation from those facts.
+- Market-data tool payloads include `market_session` and, where relevant,
+  `quote_age_minutes`. If `compute_position` cannot use executable quotes, its
+  error payload also carries `market_session` and a `quotes_unavailable` or
+  `quotes_unavailable_outside_session` warning.
 - `switch_instrument` is called only after an explicit request or a confirmed
   switch.
 - UI tools return `ui_actions`; the Angular client applies them to `Preferences`
@@ -452,6 +468,9 @@ Request:
   of being guessed.
 - Return `422` when the chain has no matching contract or no executable bid/ask
   for a leg. The error names the nearest listed strikes when they exist.
+  When the quotes are zero because the regular US options session is not open,
+  the chat tool payload says so through `market_session`; the model explains
+  the session and the next open time instead of calling the contract illiquid.
 - `position` is optional when `reference` is supplied. `reference` describes a
   client-approved edit against the most recent item in `context` (`same`,
   `shift`, `widen`, `narrow`, `expiration`). The server resolves it against
