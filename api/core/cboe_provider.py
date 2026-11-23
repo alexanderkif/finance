@@ -14,6 +14,8 @@ CBOE_OPTIONS_URL: Final = (
 CBOE_QUOTE_URL: Final = (
     "https://cdn.cboe.com/api/global/delayed_quotes/quotes/{symbol}.json"
 )
+# The CDN blocks requests without a cboe.com referer with HTTP 403.
+CBOE_REFERER: Final = "https://www.cboe.com/"
 CBOE_CACHE_TTL_SECONDS: Final = 60.0
 CBOE_STALE_CACHE_SECONDS: Final = 600.0
 _INDEX_SYMBOLS: Final = frozenset({"SPX", "VIX", "NDX", "XSP"})
@@ -247,9 +249,18 @@ class CboeOptionsProvider:
         self._quote_cache: dict[str, tuple[float, _CboeQuotePayload]] = {}
 
     async def _request(self, url: str) -> httpx.Response:
-        response = await self._client.get(url, follow_redirects=True)
+        headers = {"Referer": CBOE_REFERER}
+        response = await self._client.get(
+            url,
+            headers=headers,
+            follow_redirects=True,
+        )
         if 500 <= response.status_code < 600:
-            response = await self._client.get(url, follow_redirects=True)
+            response = await self._client.get(
+                url,
+                headers=headers,
+                follow_redirects=True,
+            )
         return response
 
     def _stale_cached(

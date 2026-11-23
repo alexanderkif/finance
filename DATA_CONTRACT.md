@@ -27,6 +27,10 @@ or written approval before any commercial launch.
   `https://cdn.cboe.com/api/global/delayed_quotes/options/{SYMBOL}.json`
 - Quote URL:
   `https://cdn.cboe.com/api/global/delayed_quotes/quotes/{SYMBOL}.json`
+- The CDN returns HTTP 403 without a `cboe.com` referer. Send
+  `Referer: https://www.cboe.com/` on every delayed-quote request. The old
+  `cdn.cboe.com` host redirects to `cdn-api.cboe.com`; follow redirects and keep
+  the header on the redirected request.
 - Index symbols require a leading underscore (for example, `_SPX`, `_VIX`,
   `_NDX`, `_XSP`); equity symbols do not (for example, `TSLA`, `SPY`). XSP is
   an index for CBOE and must be requested as `_XSP`.

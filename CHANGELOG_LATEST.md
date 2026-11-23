@@ -1,5 +1,19 @@
 # Phase log
 
+## CBOE referer fix — 2026-11-23
+
+- CBOE's delayed-quote CDN (`cdn.cboe.com`, which redirects to
+  `cdn-api.cboe.com`) now returns HTTP 403 without a `Referer` header. The
+  provider followed the redirect without one, so the option chain, underlying
+  quote, and VIX degraded, and `/api/analysis/example/{symbol}` returned `502`
+  for `Use example`.
+- `CboeOptionsProvider` now sends `Referer: https://www.cboe.com/` on every
+  delayed-quote request, including the redirected request.
+- Verified locally against live CBOE data: `/api/market/AAPL` returned price
+  349.17 and VIX 27.38, `/api/options/chain/AAPL` returned 3,454 contracts, and
+  `/api/analysis/example/AAPL` returned a 345/340 put spread for 2026-12-31.
+- Tests: backend 132 pass; Ruff passes.
+
 ## Market session awareness and chat fixes - 2026-11-10
 
 - Added a deterministic US options session clock (`America/New_York`):

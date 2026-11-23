@@ -170,6 +170,18 @@ class CboeOptionsProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(requested_hosts, ["cdn.cboe.com", "cdn-api.cboe.com"])
         self.assertEqual(chain.source, "cboe_delayed")
 
+    async def test_sends_the_cboe_referer_to_avoid_a_cdn_block(self) -> None:
+        seen_referers: list[str | None] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            seen_referers.append(request.headers.get("referer"))
+            return httpx.Response(200, json=cboe_payload())
+
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await CboeOptionsProvider(client).get_market_quote("SPY")
+
+        self.assertEqual(seen_referers, ["https://www.cboe.com/"])
+
     async def test_uses_the_sixty_second_per_symbol_cache(self) -> None:
         request_count = 0
 
